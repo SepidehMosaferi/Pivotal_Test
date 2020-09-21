@@ -1,0 +1,598 @@
+/*
+**
+** Simulation program for "PIVOTAL TEST STATISTIC FOR NON-PARAMETRIC COINTEGRATING REGRESSION FUNCTION WITH
+** ENDOGENEITY AND SEMI-LONG MEMORY"
+**
+** Author: Sepideh Mosaferi; Date: Feb 2020
+**
+** Power of the Test for f(x) [particular case]-- FBM case
+**
+*/
+new;
+library pgraph;
+  pqgwin many;
+
+proc( 2 ) =  kreg(y,x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n    = rows(y);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = pdfn(arg);
+  denom = sumc(ker');
+  ghat  = (ker*y)./sumc(ker');
+retp(ghat,denom);
+endp;
+
+proc( 2 ) =  kregepan(y,x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n    = rows(y);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = epan(arg);
+  denom = sumc(ker');
+  ghat  = (ker*y)./sumc(ker');
+retp(ghat,denom);
+endp;  
+
+proc  ( 1 ) = krdensity(x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n     = rows(x);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = epan(arg);
+  denom =  sumc(ker');
+retp(denom);
+endp;
+
+// Minimization Alg. to find theta_hat
+proc ( 1 ) = QNminimize(y,x);
+local n,thetaN;
+n = rows(y);
+thetaN = sumc(y .* exp(x) ./ (1+exp(x)))/sumc((exp(x) ./ (1+exp(x)))^2);
+retp(thetaN);
+endp;   
+
+// sigma^2_N estimate
+proc ( 1 ) = SIGMA2_N(y,x,xf,thetaN,hpower);
+local n,m,tvec,gam,arg,ker,gxtheta,sigma2,T_N;
+n = rows(y);
+m = rows(xf);
+tvec = x;   
+gam = 1/n^hpower;    
+arg = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+ker = epan(arg);    
+gxtheta = thetaN*exp(x) ./ (1+exp(x));
+T_N = ker .* ((y-gxtheta)')^2;    
+sigma2 = sumc(T_N') ./sumc(ker');
+retp(sigma2);
+endp;    
+
+
+// proc to generate LM data by looping [FBM case]
+
+proc dsim(u,d);
+/*
+** simulate I(d) data
+** input  = u
+** output = (I-L)^-d u
+*/
+local nn,y,b0,k,b,ur;
+nn= rows(u);
+b = zeros(nn,1);
+y = zeros(nn,1);
+b0=1;          
+k =1;
+do until k>nn;
+   if k==1;
+      b[k]=d;
+   else;   
+      b[k]=(k+d-1)*b[k-1]/k;
+   endif;
+   k = k+1;
+endo;  
+b=b0|b;
+k =1;
+do until k>nn;
+   ur   = rev(u[1:k]);   
+   y[k] = b[1:k]'ur;
+   k = k+1;
+endo;   
+retp(y);
+endp;
+
+
+/* main program   */
+ library gauss pgraph;
+  pqgwin many;
+
+
+fn epan(r) = 0.75*(1-r^2).*(abs(r) .le 1);
+   
+   seed1  = 78912342;
+   iter   = 10000;             @ # iterations  @
+   numh   = {1500,3000,5000,10000}; @ sample size selections @
+   nm     = 100;            @ number of points of function evaluation @
+   
+d1 = 1.051;          @ value of d @
+d2 = 0.965;
+d3 = 0.964;
+d4 = 0.933;
+
+
+aa     = 0.25; 	       @ AR coefficient for equation error AR model @
+rho    = 0.5;          @ correlation between ux and uy for endogeneity @ 
+	b  = 1;            @ regression coefficient @	
+   sig = 0.2;              @ error standard deviation @
+   
+   hpower  = 1/3;   @ value of bandwidth @
+   hpower2 = 1/4;   
+   hpower3 = 1/5;
+   
+   delta1 = 0.1166813;   @ value of tempering @
+   delta2 = 0.1265683;
+   delta3 = 0.1235951;
+   delta4 = 0.1307197;
+
+"LM d = " d3;
+"rho = " rho;
+"endogeneity correlation = " rho;
+"equation st. error = " sig;
+"AR coefficient for u_y = " aa;
+
+// sample size selection  
+  nn = numh[4]; 
+
+  gdevnd1  = zeros(iter,nm);
+  gghatd1  = zeros(iter,nm);
+  denom_gghatd1 = zeros(iter,nm);
+  SIGMA2fd1 = zeros(iter,nm);
+  
+
+  k = 1;
+  do until k > iter;            @ loop for simulation @
+	  
+  ux  = rndns(nn,1,seed1);    // regressor error  
+  uy  = rndns(nn,1,seed1);           // equation error
+  ux  = ((1-rho^2)^0.5) *ux + rho*uy;  // endogeneity correlation = rho 
+  uy  = recserar(uy,uy[1],aa);  @ converts equation error to AR(1) errors @    
+      
+  uxd4  = dsim(ux,d4);  // generate LM inputs for regressor [FBM case:d4]
+
+      
+ //x and y
+ xd4   = recserar(uxd4,uxd4[1],1);  // regressor is partial sum of LM inputs [FBM case:d4]
+ ysind4 = sin(pi*xd4)-sin(2*pi*xd4)/4+sin(3*pi*xd4)/9-sin(4*pi*xd4)/16;
+ yd4 = b*ysind4 + sig*uy;                // cointegrated regression equation [FBM case:d4]
+      
+      
+  //raw case [for the comparison] 
+  xf  = seqa(0,1/nm,nm); //interval [0,1]
+  yff = sin(pi*xf)-sin(2*pi*xf)/4+sin(3*pi*xf)/9-sin(4*pi*xf)/16;
+  
+  //minimization [FBM case]
+  thetaNd4 = QNminimize(yd4,xd4);
+
+  {sigma2Nd4}     = SIGMA2_N(yd4,xd4,xf,thetaNd4,hpower);      
+  {ghatd4,denomd4}  = kregepan(yd4,xd4,xf,hpower);    
+    {denom_CId4}  = krdensity(xd4,xf,hpower);
+          
+   
+gdevnd4[k,.] = yff'-ghatd4';
+gghatd4[k,.] = ghatd4';
+denom_gghatd4[k,.] = denom_CId4';
+SIGMA2fd4[k,.]= sigma2Nd4';
+
+  k = k+1;
+  endo;  
+
+/*
+summary statistics for table FBM
+*/
+ 
+ /***** d3 *****/
+ SIGMA2fd3 = packr(SIGMA2fd3);
+ SIGMA2fd3 = SIGMA2fd3[1:rows(SIGMA2fd3),1:cols(SIGMA2fd3)];   
+ gghatd3 = packr(gghatd3);
+ gghatd3 = gghatd3[1:rows(SIGMA2fd3),1:cols(SIGMA2fd3)];  
+ gghatd3 = gghatd3[1:rows(gghatd3),1:cols(gghatd3)];
+ gdevnd3 = packr(gdevnd3);
+ meandevgd3 = meanc(gdevnd3);
+ stdgd3     = stdc(gdevnd3);
+ meanghatd3 = meanc(gghatd3);
+ denom_gghatd3 = packr(denom_gghatd3);
+ denom_gghatd3 = denom_gghatd3[1:rows(SIGMA2fd3),1:cols(SIGMA2fd3)]; 
+ meandenom_gghatd3 = meanc(denom_gghatd3); 
+ meanSIGMA2fd3 = meanc(SIGMA2fd3); 
+  
+  /* Power of Test for point 0 */ 
+  CI_upd3_1 = zeros(rows(gghatd3),1);
+  CI_lowd3_1 = zeros(rows(gghatd3),1);
+  Inclusiond3_1 = zeros(rows(gghatd3),1);
+  
+  k = 1;
+  do until k > rows(gghatd3); 
+  
+  CI_upd3_1[k,1] = gghatd3[k,1]+1.96*sqrt((SIGMA2fd3[k,1]*0.3) ./ (0.5*denom_gghatd3[k,1]));
+  CI_lowd3_1[k,1] = gghatd3[k,1]-1.96*sqrt((SIGMA2fd3[k,1]*0.3) ./ (0.5*denom_gghatd3[k,1]));   
+  Inclusiond3_1[k,1] = 0.125>=CI_lowd3_1[k,1] and 0.125<=CI_upd3_1[k,1];
+      
+  k = k+1;
+  endo;
+  
+ NotInclusiond3_1 = 100*(1-meanc(Inclusiond3_1)); /* power of the test in percentage */
+  
+ /* Power Calculation for point 0.25 */  
+  CI_upd3_26 = zeros(rows(gghatd3),1);
+  CI_lowd3_26 = zeros(rows(gghatd3),1);
+  Inclusiond3_26 = zeros(rows(gghatd3),1);
+  
+  k = 1;
+  do until k > rows(gghatd3); 
+  
+  CI_upd3_26[k,1] = gghatd3[k,26]+1.96*sqrt((SIGMA2fd3[k,26]*0.3) ./ (0.5*denom_gghatd3[k,26]));
+  CI_lowd3_26[k,1] = gghatd3[k,26]-1.96*sqrt((SIGMA2fd3[k,26]*0.3) ./ (0.5*denom_gghatd3[k,26]));   
+  Inclusiond3_26[k,1] = 0.141>=CI_lowd3_26[k,1] and 0.141<=CI_upd3_26[k,1];
+      
+  k = k+1;
+  endo;
+  
+ NotInclusiond3_26 = 100*(1-meanc(Inclusiond3_26)); /* power of the test in percentage */ 
+  
+  
+  /* Power Calculation for point 0.50 */  
+  CI_upd3_51 = zeros(rows(gghatd3),1);
+  CI_lowd3_51 = zeros(rows(gghatd3),1);
+  Inclusiond3_51 = zeros(rows(gghatd3),1);
+  
+  k = 1;
+  do until k > rows(gghatd3); 
+  
+  CI_upd3_51[k,1] = gghatd3[k,51]+1.96*sqrt((SIGMA2fd3[k,51]*0.3) ./ (0.5*denom_gghatd3[k,51]));
+  CI_lowd3_51[k,1] = gghatd3[k,51]-1.96*sqrt((SIGMA2fd3[k,51]*0.3) ./ (0.5*denom_gghatd3[k,51]));   
+  Inclusiond3_51[k,1] = 0.156>=CI_lowd3_51[k,1] and 0.156<=CI_upd3_51[k,1];
+      
+  k = k+1;
+  endo;
+  
+ NotInclusiond3_51 = 100*(1-meanc(Inclusiond3_51)); /* power of the test in percentage */  
+  
+ 
+  /* Power Calculation for point 0.75 */  
+  CI_upd3_76 = zeros(rows(gghatd3),1);
+  CI_lowd3_76 = zeros(rows(gghatd3),1);
+  Inclusiond3_76 = zeros(rows(gghatd3),1);
+  
+  k = 1;
+  do until k > rows(gghatd3); 
+  
+  CI_upd3_76[k,1] = gghatd3[k,76]+1.96*sqrt((SIGMA2fd3[k,76]*0.3) ./ (0.5*denom_gghatd3[k,76]));
+  CI_lowd3_76[k,1] = gghatd3[k,76]-1.96*sqrt((SIGMA2fd3[k,76]*0.3) ./ (0.5*denom_gghatd3[k,76]));   
+  Inclusiond3_76[k,1] = 0.170>=CI_lowd3_76[k,1] and 0.170<=CI_upd3_76[k,1];
+      
+  k = k+1;
+  endo;
+  
+ NotInclusiond3_76 = 100*(1-meanc(Inclusiond3_76)); /* power of the test in percentage */  
+
+
+  /* Power Calculation for point 0.95 */  
+  CI_upd3_96 = zeros(rows(gghatd3),1);
+  CI_lowd3_96 = zeros(rows(gghatd3),1);
+  Inclusiond3_96 = zeros(rows(gghatd3),1);
+  
+  k = 1;
+  do until k > rows(gghatd3); 
+  
+  CI_upd3_96[k,1] = gghatd3[k,96]+1.96*sqrt((SIGMA2fd3[k,96]*0.3) ./ (0.5*denom_gghatd3[k,96]));
+  CI_lowd3_96[k,1] = gghatd3[k,96]-1.96*sqrt((SIGMA2fd3[k,96]*0.3) ./ (0.5*denom_gghatd3[k,96]));   
+  Inclusiond3_96[k,1] = 0.180>=CI_lowd3_96[k,1] and 0.180<=CI_upd3_96[k,1];
+      
+  k = k+1;
+  endo;
+  
+ NotInclusiond3_96 = 100*(1-meanc(Inclusiond3_96)); /* power of the test in percentage */ 
+  
+ 
+ NotInclusiond3_1~NotInclusiond3_26~NotInclusiond3_51~NotInclusiond3_76~NotInclusiond3_96; /* print the results */
+
+
+
+/*
+**
+** Power Test for f(x)-- TFBM case
+**
+*/
+new;
+library pgraph;
+  pqgwin many;
+
+proc( 2 ) =  kreg(y,x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n    = rows(y);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = pdfn(arg);
+  denom = sumc(ker');
+  ghat  = (ker*y)./sumc(ker');
+retp(ghat,denom);
+endp;
+
+proc( 2 ) =  kregepan(y,x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n    = rows(y);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = epan(arg);
+  denom = sumc(ker');
+  ghat  = (ker*y)./sumc(ker');
+retp(ghat,denom);
+endp;  
+
+proc  ( 1 ) = krdensity(x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n     = rows(x);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = epan(arg);
+  denom =  sumc(ker');
+retp(denom);
+endp;
+
+// Minimization Alg. to find theta_hat
+proc ( 1 ) = QNminimize(y,x);
+local n,thetaN;
+n = rows(y);
+thetaN = sumc(y .* exp(x) ./ (1+exp(x)))/sumc((exp(x) ./ (1+exp(x)))^2);
+retp(thetaN);
+endp;   
+
+// sigma^2_N estimate
+proc ( 1 ) = SIGMA2_N(y,x,xf,thetaN,hpower);
+local n,m,tvec,gam,arg,ker,gxtheta,sigma2,T_N;
+n = rows(y);
+m = rows(xf);
+tvec = x;   
+gam = 1/n^hpower;    
+arg = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+ker = epan(arg);    
+gxtheta = thetaN*exp(x) ./ (1+exp(x));
+T_N = ker .* ((y-gxtheta)')^2;    
+sigma2 = sumc(T_N') ./sumc(ker');
+retp(sigma2);
+endp;    
+
+
+// proc to generate LM data by looping [TFBM case]
+
+proc dsimtemp(u,d,delta);
+/*
+** simulate I(d) data
+** input  = u
+** output = (I-e^(-lambda_N)*L)^-d u; lambda_N=1/N^delta
+*/
+local nn,y,b0,k,b,ur,temp;
+nn= rows(u);
+b = zeros(nn,1);
+y = zeros(nn,1);
+temp = exp(-1/nn^delta);    
+b0=1;          
+k =1;
+do until k>nn;
+   if k==1;
+      b[k]=temp*d;
+   else;   
+      b[k]=temp*(k+d-1)*b[k-1]/k;
+   endif;
+   k = k+1;
+endo;  
+b=b0|b;
+k =1;
+do until k>nn;
+   ur   = rev(u[1:k]);   
+   y[k] = b[1:k]'ur;
+   k = k+1;
+endo;   
+retp(y);
+endp;
+
+
+/* main program   */
+ library gauss pgraph;
+  pqgwin many;
+
+
+fn epan(r) = 0.75*(1-r^2).*(abs(r) .le 1);
+   
+   seed1  = 78912342;
+   iter   = 10000;             @ # iterations  @
+   numh   = {1500,3000,5000,10584}; @ sample size selections @
+   nm     = 100;            @ number of points of function evaluation @
+   
+d1 = 1.051;          @ value of d @
+d2 = 0.965;
+d3 = 0.964;
+d4 = 0.933;
+
+
+aa     = 0.25; 	       @ AR coefficient for equation error AR model @
+rho    = 0.5;          @ correlation between ux and uy for endogeneity @ 
+	b  = 1;            @ regression coefficient @	
+   sig = 0.2;              @ error standard deviation @
+   
+   hpower  = 1/3;   @ value of bandwidth @
+   hpower2 = 1/4;   
+   hpower3 = 1/5;
+   
+   delta1 = 0.1166813;   @ value of tempering @
+   delta2 = 0.1265683;
+   delta3 = 0.1235951;
+   delta4 = 0.1299191;
+
+"LM d = " d4;
+"rho = " rho;
+"endogeneity correlation = " rho;
+"equation st. error = " sig;
+"AR coefficient for u_y = " aa;
+
+// sample size selection  
+  nn = numh[4]; 
+
+  gdevn_temp4d4  = zeros(iter,nm);
+  gghat_temp4d4  = zeros(iter,nm);
+  denom_gghat_temp4d4 = zeros(iter,nm);
+  SIGMA2f_temp4d4 = zeros(iter,nm);
+
+  
+  k = 1;
+  do until k > iter;            @ loop for simulation @
+	  
+  ux  = rndns(nn,1,seed1);    // regressor error  
+  uy  = rndns(nn,1,seed1);           // equation error
+  ux  = ((1-rho^2)^0.5) *ux + rho*uy;  // endogeneity correlation = rho 
+  uy  = recserar(uy,uy[1],aa);  @ converts equation error to AR(1) errors @    
+      
+  uxtemp4d4 = dsimtemp(ux,d4,delta4);  // generate LM inputs for regressor [TFBM case: d4]         
+      
+ //x and y
+ xtemp4d4   = recserar(uxtemp4d4,uxtemp4d4[1],1);  // regressor is partial sum of LM inputs [TFBM case--d4]
+ ysintemp4d4 = sin(pi*xtemp4d4)-sin(2*pi*xtemp4d4)/4+sin(3*pi*xtemp4d4)/9-sin(4*pi*xtemp4d4)/16;
+ ytemp4d4 = b*ysintemp4d4 + sig*uy;                // cointegrated regression equation [TFBM case--d4]   
+      
+  //raw case [for the comparison] 
+  xf  = seqa(0,1/nm,nm); //interval [0,1]
+  yff = sin(pi*xf)-sin(2*pi*xf)/4+sin(3*pi*xf)/9-sin(4*pi*xf)/16;
+  
+  //minimization [TFBM case]
+  thetaN_temp4d4 = QNminimize(ytemp4d4,xtemp4d4);
+  {sigma2N_temp4d4} = SIGMA2_N(ytemp4d4,xtemp4d4,xf,thetaN_temp4d4,hpower3);  
+  {ghattemp4d4,denomtemp4d4} = kregepan(ytemp4d4,xtemp4d4,xf,hpower3); 
+  {denom_CI_temp4d4}  = krdensity(xtemp4d4,xf,hpower3);
+   
+gdevn_temp4d4[k,.] = yff'-ghattemp4d4';
+gghat_temp4d4[k,.] = ghattemp4d4';
+denom_gghat_temp4d4[k,.] = denom_CI_temp4d4';
+SIGMA2f_temp4d4[k,.]= sigma2N_temp4d4';
+
+  k = k+1;
+  endo;  
+
+/*
+summary statistics for table TFBM
+*/
+ /***** d4 *****/
+ gghat_temp4d4 = packr(gghat_temp4d4);
+ gdevn_temp4d4 = packr(gdevn_temp4d4);
+ meandevg_temp4d4 = meanc(gdevn_temp4d4);
+ stdg_temp4d4     = stdc(gdevn_temp4d4);
+ meanghat_temp4d4 = meanc(gghat_temp4d4);
+ denom_gghat_temp4d4 = packr(denom_gghat_temp4d4);
+ denom_gghat_temp4d4 = denom_gghat_temp4d4[1:rows(gghat_temp4d4),1:cols(denom_gghat_temp4d4)]; 
+ meandenom_gghat_temp4d4 = meanc(denom_gghat_temp4d4); 
+ SIGMA2f_temp4d4 = packr(SIGMA2f_temp4d4);
+ SIGMA2f_temp4d4 = SIGMA2f_temp4d4[1:rows(gghat_temp4d4),1:cols(denom_gghat_temp4d4)]; 
+ meanSIGMA2f_temp4d4 = meanc(SIGMA2f_temp4d4); 
+
+    
+ /* Power of Test for point 0 */ 
+  CI_uptemp4d4_1 = zeros(rows(gghat_temp4d4),1);
+  CI_lowtemp4d4_1 = zeros(rows(gghat_temp4d4),1);
+  Inclusiontemp4d4_1 = zeros(rows(gghat_temp4d4),1);
+  
+  k = 1;
+  do until k > rows(gghat_temp4d4); 
+  
+  CI_uptemp4d4_1[k,1] = gghat_temp4d4[k,1]+1.96*sqrt((SIGMA2f_temp4d4[k,1]*0.3) ./ (0.5*denom_gghat_temp4d4[k,1]));
+  CI_lowtemp4d4_1[k,1] = gghat_temp4d4[k,1]-1.96*sqrt((SIGMA2f_temp4d4[k,1]*0.3) ./ (0.5*denom_gghat_temp4d4[k,1]));   
+  Inclusiontemp4d4_1[k,1] = 0.125>=CI_lowtemp4d4_1[k,1] and 0.125<=CI_uptemp4d4_1[k,1];
+      
+  k = k+1;
+  endo;
+  
+ NotInclusiontemp4d4_1 = 100*(1-meanc(Inclusiontemp4d4_1)); /* power of the test in percentage */
+ 
+ 
+ /* Power Calculation for point 0.25 */  
+  CI_uptemp4d4_26 = zeros(rows(gghat_temp4d4),1);
+  CI_lowtemp4d4_26 = zeros(rows(gghat_temp4d4),1);
+  Inclusiontemp4d4_26 = zeros(rows(gghat_temp4d4),1);
+  
+  k = 1;
+  do until k > rows(gghat_temp4d4); 
+  
+  CI_uptemp4d4_26[k,1] = gghat_temp4d4[k,26]+1.96*sqrt((SIGMA2f_temp4d4[k,26]*0.3) ./ (0.5*denom_gghat_temp4d4[k,26]));
+  CI_lowtemp4d4_26[k,1] = gghat_temp4d4[k,26]-1.96*sqrt((SIGMA2f_temp4d4[k,26]*0.3) ./ (0.5*denom_gghat_temp4d4[k,26]));   
+  Inclusiontemp4d4_26[k,1] = 0.141>=CI_lowtemp4d4_26[k,1] and 0.141<=CI_uptemp4d4_26[k,1];
+      
+  k = k+1;
+  endo;
+  
+ NotInclusiontemp4d4_26 = 100*(1-meanc(Inclusiontemp4d4_26)); /* power of the test in percentage */
+ 
+
+ /* Power Calculation for point 0.5 */   
+  CI_uptemp4d4_51 = zeros(rows(gghat_temp4d4),1);
+  CI_lowtemp4d4_51 = zeros(rows(gghat_temp4d4),1);
+  Inclusiontemp4d4_51 = zeros(rows(gghat_temp4d4),1);
+  
+  k = 1;
+  do until k > rows(gghat_temp4d4); 
+  
+  CI_uptemp4d4_51[k,1] = gghat_temp4d4[k,51]+1.96*sqrt((SIGMA2f_temp4d4[k,51]*0.3) ./ (0.5*denom_gghat_temp4d4[k,51]));
+  CI_lowtemp4d4_51[k,1] = gghat_temp4d4[k,51]-1.96*sqrt((SIGMA2f_temp4d4[k,51]*0.3) ./ (0.5*denom_gghat_temp4d4[k,51]));   
+  Inclusiontemp4d4_51[k,1] = 0.156>=CI_lowtemp4d4_51[k,1] and 0.156<=CI_uptemp4d4_51[k,1];
+      
+  k = k+1;
+  endo;
+  
+ NotInclusiontemp4d4_51 = 100*(1-meanc(Inclusiontemp4d4_51)); /* power of the test in percentage */
+ 
+ 
+ /* Power Calculation for point 0.75 */  
+  CI_uptemp4d4_76 = zeros(rows(gghat_temp4d4),1);
+  CI_lowtemp4d4_76 = zeros(rows(gghat_temp4d4),1);
+  Inclusiontemp4d4_76 = zeros(rows(gghat_temp4d4),1);
+  
+  k = 1;
+  do until k > rows(gghat_temp4d4); 
+  
+  CI_uptemp4d4_76[k,1] = gghat_temp4d4[k,76]+1.96*sqrt((SIGMA2f_temp4d4[k,76]*0.3) ./ (0.5*denom_gghat_temp4d4[k,76]));
+  CI_lowtemp4d4_76[k,1] = gghat_temp4d4[k,76]-1.96*sqrt((SIGMA2f_temp4d4[k,76]*0.3) ./ (0.5*denom_gghat_temp4d4[k,76]));   
+  Inclusiontemp4d4_76[k,1] = 0.170>=CI_lowtemp4d4_76[k,1] and 0.170<=CI_uptemp4d4_76[k,1];
+      
+  k = k+1;
+  endo;
+  
+ NotInclusiontemp4d4_76 = 100*(1-meanc(Inclusiontemp4d4_76)); /* power of the test in percentage */
+ 
+ 
+ /* Power Calculation for point 0.95 */  
+  CI_uptemp4d4_96 = zeros(rows(gghat_temp4d4),1);
+  CI_lowtemp4d4_96 = zeros(rows(gghat_temp4d4),1);
+  Inclusiontemp4d4_96 = zeros(rows(gghat_temp4d4),1);
+  
+  k = 1;
+  do until k > rows(gghat_temp4d4); 
+  
+  CI_uptemp4d4_96[k,1] = gghat_temp4d4[k,96]+1.96*sqrt((SIGMA2f_temp4d4[k,96]*0.3) ./ (0.5*denom_gghat_temp4d4[k,96]));
+  CI_lowtemp4d4_96[k,1] = gghat_temp4d4[k,96]-1.96*sqrt((SIGMA2f_temp4d4[k,96]*0.3) ./ (0.5*denom_gghat_temp4d4[k,96]));   
+  Inclusiontemp4d4_96[k,1] = 0.180>=CI_lowtemp4d4_96[k,1] and 0.180<=CI_uptemp4d4_96[k,1];
+      
+  k = k+1;
+  endo;
+  
+ NotInclusiontemp4d4_96 = 100*(1-meanc(Inclusiontemp4d4_96)); /* power of the test in percentage */
+  
+ NotInclusiontemp4d4_1~NotInclusiontemp4d4_26~NotInclusiontemp4d4_51~NotInclusiontemp4d4_76~NotInclusiontemp4d4_96; /* print the results */ 
+
