@@ -1,0 +1,261 @@
+/*
+**
+** Simulation program for "PIVOTAL TEST STATISTIC FOR NON-PARAMETRIC COINTEGRATING REGRESSION FUNCTION WITH
+** ENDOGENEITY AND SEMI-LONG MEMORY"
+**
+** Author: Sepideh Mosaferi; Date: Feb 2020
+**
+** Table 1: f(x)
+**
+*/
+new;
+library pgraph;
+  pqgwin many;
+
+proc( 2 ) =  kreg(y,x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n    = rows(y);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = pdfn(arg);
+  denom = sumc(ker');
+  ghat  = (ker*y)./sumc(ker');
+retp(ghat,denom);
+endp;
+
+proc( 2 ) =  kregepan(y,x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n    = rows(y);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = epan(arg);
+  denom = sumc(ker');
+  ghat  = (ker*y)./sumc(ker');
+retp(ghat,denom);
+endp;  
+
+proc  ( 1 ) = krdensity(x,xf,hpower,d);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n     = rows(x);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = epan(arg);
+  denom =  sumc(ker')/((n^(0.5-d))*gam);
+retp(denom);
+endp;
+
+
+// proc to generate LM data by looping [FBM case]
+
+proc dsim(u,d);
+/*
+** simulate I(d) data
+** input  = u
+** output = (I-L)^-d u
+*/
+local nn,y,b0,k,b,ur;
+nn= rows(u);
+b = zeros(nn,1);
+y = zeros(nn,1);
+b0=1;          
+k =1;
+do until k>nn;
+   if k==1;
+      b[k]=d;
+   else;   
+      b[k]=(k+d-1)*b[k-1]/k;
+   endif;
+   k = k+1;
+endo;  
+b=b0|b;
+k =1;
+do until k>nn;
+   ur   = rev(u[1:k]);   
+   y[k] = b[1:k]'ur;
+   k = k+1;
+endo;   
+retp(y);
+endp;
+
+// proc to generate LM data by looping [TFBM case]
+
+proc dsimtemp(u,d,delta);
+/*
+** simulate I(d) data
+** input  = u
+** output = (I-e^(-lambda_N)*L)^-d u; lambda_N=1/N^delta
+*/
+local nn,y,b0,k,b,ur,temp;
+nn= rows(u);
+b = zeros(nn,1);
+y = zeros(nn,1);
+temp = exp(-1/nn^delta);    
+b0=1;          
+k =1;
+do until k>nn;
+   if k==1;
+      b[k]=temp*d;
+   else;   
+      b[k]=temp*(k+d-1)*b[k-1]/k;
+   endif;
+   k = k+1;
+endo;  
+b=b0|b;
+k =1;
+do until k>nn;
+   ur   = rev(u[1:k]);   
+   y[k] = b[1:k]'ur;
+   k = k+1;
+endo;   
+retp(y);
+endp;
+
+
+/* main program   */
+ library gauss pgraph;
+  pqgwin many;
+
+
+fn epan(r) = 0.75*(1-r^2).*(abs(r) .le 1);
+   
+   seed1  = 78912342;
+   iter   = 10000;             @ # iterations  @
+   numh   = {500,600,800,1000,5000}; @ sample size selections @
+   nm     = 100;            @ number of points of function evaluation @
+   
+d0 = 0;          @ value of d @
+d01 = 0.1;
+d02 = 0.2;
+d03 = 0.3;
+d04 = 0.4;
+
+
+aa     = 0.25; 	       @ AR coefficient for equation error AR model @
+rho    = 0.5;          @ correlation between ux and uy for endogeneity @ 
+	b  = 1;            @ regression coefficient @	
+   sig = 0.2;              @ error standard deviation @
+   
+   hpower  = 1/3;   @ value of bandwidth @
+   hpower2 = 1/4;   
+   hpower3 = 1/5;
+   hpower4 = 1/6;
+   
+   delta1 = 1/3;   @ value of tempering @
+   delta2 = 1/4;
+   delta3 = 1/5;
+   delta4 = 1/6;
+
+"LM d = " d0;
+"rho = " rho;
+"endogeneity correlation = " rho;
+"equation st. error = " sig;
+"AR coefficient for u_y = " aa;
+
+// sample size selection  
+  nn = numh[4]; 
+
+  gdevn  = zeros(iter,nm);
+  gghat  = zeros(iter,nm);
+    
+  gdevntemp1  = zeros(iter,nm);
+  gghattemp1  = zeros(iter,nm); 
+  
+  gdevntemp3  = zeros(iter,nm);
+  gghattemp3  = zeros(iter,nm); 
+  
+  xfrep = zeros(iter,nm);
+  kernelestimate = zeros(iter,nm);
+  
+  k = 1;
+  do until k > iter;            @ loop for simulation @
+	  
+  ux  = rndns(nn,1,seed1);    // regressor error  
+  uy  = rndns(nn,1,seed1);           // equation error
+  ux  = ((1-rho^2)^0.5) *ux + rho*uy;  // endogeneity correlation = rho 
+  uy  = recserar(uy,uy[1],aa);  @ converts equation error to AR(1) errors @
+
+  ux0  = dsim(ux,d04);  // generate LM inputs for regressor [FBM case]
+  uxtemp1 = dsimtemp(ux,d04,delta1);  // generate LM inputs for regressor [TFBM case1]  
+  uxtemp3 = dsimtemp(ux,d04,delta3);  // generate LM inputs for regressor [TFBM case3]    
+      
+ //x and y
+ x   = recserar(ux0,ux0[1],1);  // regressor is partial sum of LM inputs [FBM case]
+ ysin = sin(pi*x)-sin(2*pi*x)/4+sin(3*pi*x)/9-sin(4*pi*x)/16;
+ y = b*ysin + sig*uy;                // cointegrated regression equation [FBM case]
+      
+ xtemp1   = recserar(uxtemp1,uxtemp1[1],1);  // regressor is partial sum of LM inputs [TFBM case1]
+ ysintemp1 = sin(pi*xtemp1)-sin(2*pi*xtemp1)/4+sin(3*pi*xtemp1)/9-sin(4*pi*xtemp1)/16;
+ ytemp1 = b*ysintemp1 + sig*uy;                // cointegrated regression equation [TFBM case1]   
+      
+ xtemp3   = recserar(uxtemp3,uxtemp3[1],1);  // regressor is partial sum of LM inputs [TFBM case3]
+ ysintemp3 = sin(pi*xtemp3)-sin(2*pi*xtemp3)/4+sin(3*pi*xtemp3)/9-sin(4*pi*xtemp3)/16;
+ ytemp3 = b*ysintemp3 + sig*uy;                // cointegrated regression equation [TFBM case3]     
+      
+  //raw case [for the comparison] 
+  xf  = seqa(0,1/nm,nm); //interval [0,1]
+  yff = sin(pi*xf)-sin(2*pi*xf)/4+sin(3*pi*xf)/9-sin(4*pi*xf)/16;
+
+  {ghat,denom}  = kregepan(y,x,xf,hpower4); 
+  
+  {ghattemp1,denomtemp1}  = kregepan(ytemp1,xtemp1,xf,hpower4); 
+  {ghattemp3,denomtemp3}  = kregepan(ytemp3,xtemp3,xf,hpower4); 
+   
+gdevn[k,.] = yff'-ghat';
+gghat[k,.] = ghat';
+
+ gdevntemp1[k,.]  = yff'-ghattemp1';
+ gghattemp1[k,.]  = ghattemp1';
+ 
+ gdevntemp3[k,.]  = yff'-ghattemp3';
+ gghattemp3[k,.]  = ghattemp3';
+
+  k = k+1;
+  endo;  
+
+/*
+summary statistics for table
+*/
+// FBM case
+ gghat = packr(gghat);
+ gdevn = packr(gdevn);
+ meandevg = meanc(gdevn);
+ stdg     = stdc(gdevn);
+ meanghat = meanc(gghat);
+print;
+ "dimension gdevn.FBM = " rows(gdevn);
+ "Bias.FBM = " meanc(meandevg);
+ "St Dev.FBM = " meanc(stdg);
+ "MSE.FBM = "  meanc(meandevg^2)+meanc(stdg^2);
+ "RMSE.FBM = "  ( meanc(meandevg^2)+meanc(stdg^2) )^0.5;
+
+// TFBM case1
+ gghattemp1 = packr(gghattemp1);
+ gdevntemp1 = packr(gdevntemp1);
+ meandevgtemp1 = meanc(gdevntemp1);
+ stdgtemp1     = stdc(gdevntemp1);
+ meanghattemp1 = meanc(gghattemp1);
+print;
+ "dimension gdevn.TFBM1 = " rows(gdevntemp1);
+ "Bias.TFBM1 = " meanc(meandevgtemp1);
+ "St Dev.TFBM1 = " meanc(stdgtemp1);
+ "MSE.TFBM1 = "  meanc(meandevgtemp1^2)+meanc(stdgtemp1^2);
+ "RMSE.TFBM1 = "  ( meanc(meandevgtemp1^2)+meanc(stdgtemp1^2) )^0.5;
+
+// TFBM case3
+ gghattemp3 = packr(gghattemp3);
+ gdevntemp3 = packr(gdevntemp3);
+ meandevgtemp3 = meanc(gdevntemp3);
+ stdgtemp3     = stdc(gdevntemp3);
+ meanghattemp3 = meanc(gghattemp3);
+print;
+ "dimension gdevn.TFBM3 = " rows(gdevntemp3);
+ "Bias.TFBM3 = " meanc(meandevgtemp3);
+ "St Dev.TFBM3 = " meanc(stdgtemp3);
+ "MSE.TFBM3 = "  meanc(meandevgtemp3^2)+meanc(stdgtemp3^2);
+ "RMSE.TFBM3 = "  ( meanc(meandevgtemp3^2)+meanc(stdgtemp3^2) )^0.5;
