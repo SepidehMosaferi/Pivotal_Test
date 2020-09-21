@@ -17,3 +17,5 @@ Contents
 6. Code for Table 2
 7. Code for Table 3
 8. Code for Table 4
+
+The codes are in GAUSS version 20.04.4599.
