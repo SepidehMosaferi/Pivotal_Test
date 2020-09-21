@@ -1,0 +1,424 @@
+/*
+**
+** Simulation program for "PIVOTAL TEST STATISTIC FOR NON-PARAMETRIC COINTEGRATING REGRESSION FUNCTION WITH
+** ENDOGENEITY AND SEMI-LONG MEMORY"
+**
+** Author: Sepideh Mosaferi; Date: Feb 2020
+**
+**
+*/
+new;
+library pgraph;
+  pqgwin many;
+
+proc( 2 ) =  kreg(y,x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n    = rows(y);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = pdfn(arg);
+  denom = sumc(ker');
+  ghat  = (ker*y)./sumc(ker');
+retp(ghat,denom);
+endp;
+
+proc( 2 ) =  kregepan(y,x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n    = rows(y);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = epan(arg);
+  denom = sumc(ker');
+  ghat  = (ker*y)./sumc(ker');
+retp(ghat,denom);
+endp;  
+
+proc  ( 1 ) = krdensity(x,xf,hpower,d);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n     = rows(x);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = epan(arg);
+  denom =  sumc(ker')/((n^(0.5-d))*gam);
+retp(denom);
+endp;
+
+// Minimization Alg. to find theta_hat
+proc ( 1 ) = QNminimize(y,x);
+local n,thetaN;
+n = rows(y);
+thetaN = sumc(y .* exp(x) ./ (1+exp(x)))/sumc((exp(x) ./ (1+exp(x)))^2);
+retp(thetaN);
+endp;   
+
+// TNestimate for the FBM case
+proc( 1 ) = TNestimate(y,x,xf,hpower,thetaN,d);
+local n,m,tvec,gam,arg,ker,gxtheta,pix,T_N,T_NF;
+n = rows(y);
+m = rows(xf);    
+tvec = x;    
+gam = 1/n^hpower;
+arg = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+ker = epan(arg);
+gxtheta = thetaN*exp(x) ./ (1+exp(x));
+pix = exp(-xf^2 ./ 2); 
+T_N = ker .* ((y-gxtheta)');
+T_N = (sumc(T_N'))^2 .* pix;
+T_NF = T_N ./ ((n^(0.5-d))*gam);
+retp(T_NF);
+endp; 
+
+// TNlambdaestimate for the TFBM case
+proc( 1 ) = TNlambdaestimate(y,x,xf,hpower,thetaN,delta,d);
+local n,m,tvec,gam,arg,ker,gxtheta,pix,T_N,temp,T_NFlambdad;
+n = rows(y);
+m = rows(xf);    
+tvec = x;    
+gam = 1/n^hpower;
+arg = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+ker = epan(arg);
+gxtheta = thetaN*exp(x) ./ (1+exp(x));
+pix = exp(-xf^2 ./ 2);    
+T_N = ker .* ((y-gxtheta)');
+T_N = (sumc(T_N'))^2 .* pix;    
+temp = n^(-delta*d);     
+T_NFlambdad = T_N ./ ((n^0.5)*gam*temp);    
+retp(T_NFlambdad);
+endp; 
+
+// proc to generate LM data by looping [FBM case]
+
+proc dsim(u,d);
+/*
+** simulate I(d) data
+** input  = u
+** output = (I-L)^-d u
+*/
+local nn,y,b0,k,b,ur;
+nn= rows(u);
+b = zeros(nn,1);
+y = zeros(nn,1);
+b0=1;          
+k =1;
+do until k>nn;
+   if k==1;
+      b[k]=d;
+   else;   
+      b[k]=(k+d-1)*b[k-1]/k;
+   endif;
+   k = k+1;
+endo;  
+b=b0|b;
+k =1;
+do until k>nn;
+   ur   = rev(u[1:k]);   
+   y[k] = b[1:k]'ur;
+   k = k+1;
+endo;   
+retp(y);
+endp;
+
+// proc to generate LM data by looping [TFBM case]
+
+proc dsimtemp(u,d,delta);
+/*
+** simulate I(d) data
+** input  = u
+** output = (I-e^(-lambda_N)*L)^-d u; lambda_N=1/N^delta
+*/
+local nn,y,b0,k,b,ur,temp;
+nn= rows(u);
+b = zeros(nn,1);
+y = zeros(nn,1);
+temp = exp(-1/nn^delta);    
+b0=1;          
+k =1;
+do until k>nn;
+   if k==1;
+      b[k]=temp*d;
+   else;   
+      b[k]=temp*(k+d-1)*b[k-1]/k;
+   endif;
+   k = k+1;
+endo;  
+b=b0|b;
+k =1;
+do until k>nn;
+   ur   = rev(u[1:k]);   
+   y[k] = b[1:k]'ur;
+   k = k+1;
+endo;   
+retp(y);
+endp;
+
+
+/* main program   */
+ library gauss pgraph;
+  pqgwin many;
+
+
+fn epan(r) = 0.75*(1-r^2).*(abs(r) .le 1);
+   
+   seed1  = 78912342;
+   iter   = 10000;             @ # iterations  @
+   numh   = {500,600,800,1000}; @ sample size selections @
+   nm     = 100;            @ number of points of function evaluation @
+   
+d0 = 0;          @ value of d @
+d01 = 0.1;
+d02 = 0.2;
+d03 = 0.3;
+d04 = 0.4;
+d09 = 0.9;  //special case
+d12 = 1.2;  //special case
+
+
+aa     = 0.25; 	       @ AR coefficient for equation error AR model @
+rho    = 0.5;          @ correlation between ux and uy for endogeneity @ 
+	b  = 1;            @ regression coefficient @	
+   sig = 0.2;              @ error standard deviation @
+   
+   hpower  = 1/3;   @ value of bandwidth @
+   hpower2 = 1/4;   
+   hpower3 = 1/5;
+   hpower4 = 1/6;
+   
+   delta1 = 1/3;   @ value of tempering @
+   delta2 = 1/4;
+   delta3 = 1/5;
+   delta4 = 1/6;
+
+"LM d = " d0;
+"rho = " rho;
+"endogeneity correlation = " rho;
+"equation st. error = " sig;
+"AR coefficient for u_y = " aa;
+
+// sample size selection  
+  nn = numh[4]; 
+
+  gdevn1  = zeros(iter,nm);
+  gghat1  = zeros(iter,nm);
+  
+  gdevn2  = zeros(iter,nm);
+  gghat2  = zeros(iter,nm);
+    
+  gdevntemp1a  = zeros(iter,nm);
+  gghattemp1a  = zeros(iter,nm); 
+  
+  gdevntemp1b  = zeros(iter,nm);
+  gghattemp1b  = zeros(iter,nm); 
+  
+  gdevntemp2  = zeros(iter,nm);
+  gghattemp2  = zeros(iter,nm);
+  
+  gdevntemp3  = zeros(iter,nm);
+  gghattemp3  = zeros(iter,nm);
+  
+  gdevntemp4  = zeros(iter,nm);
+  gghattemp4  = zeros(iter,nm);
+  
+  gTNhat = zeros(iter,nm);
+  gTNlambdahat = zeros(iter,nm);
+  
+  xfrep = zeros(iter,nm);
+  kernelestimate = zeros(iter,nm);
+  
+  k = 1;
+  do until k > iter;            @ loop for simulation @
+	  
+  ux  = rndns(nn,1,seed1);    // regressor error  
+  uy  = rndns(nn,1,seed1);           // equation error
+  ux  = ((1-rho^2)^0.5) *ux + rho*uy;  // endogeneity correlation = rho 
+  uy  = recserar(uy,uy[1],aa);  @ converts equation error to AR(1) errors @
+
+  ux  = dsim(ux,d03);  // generate LM inputs for regressor [FBM case]
+  uxtemp1 = dsimtemp(ux,d03,delta1);  // generate LM inputs for regressor [TFBM case--delta1]   
+  uxtemp2 = dsimtemp(ux,d03,delta2);  // generate LM inputs for regressor [TFBM case--delta2]  
+  uxtemp3 = dsimtemp(ux,d03,delta3);  // generate LM inputs for regressor [TFBM case--delta3]  
+  uxtemp4 = dsimtemp(ux,d03,delta4);  // generate LM inputs for regressor [TFBM case--delta4]      
+      
+ //x and y
+ x   = recserar(ux,ux[1],1);  // regressor is partial sum of LM inputs [FBM case]
+ ysin = sin(pi*x)-sin(2*pi*x)/4+sin(3*pi*x)/9-sin(4*pi*x)/16;
+ y = b*ysin + sig*uy;                // cointegrated regression equation [FBM case]
+      
+ xtemp1   = recserar(uxtemp1,uxtemp1[1],1);  // regressor is partial sum of LM inputs [TFBM case--delta1]
+ ysintemp1 = sin(pi*xtemp1)-sin(2*pi*xtemp1)/4+sin(3*pi*xtemp1)/9-sin(4*pi*xtemp1)/16;
+ ytemp1 = b*ysintemp1 + sig*uy;                // cointegrated regression equation [TFBM case--delta1]    
+      
+ xtemp2   = recserar(uxtemp2,uxtemp2[1],1);  // regressor is partial sum of LM inputs [TFBM case--delta2]
+ ysintemp2 = sin(pi*xtemp2)-sin(2*pi*xtemp2)/4+sin(3*pi*xtemp2)/9-sin(4*pi*xtemp2)/16;
+ ytemp2 = b*ysintemp2 + sig*uy;                // cointegrated regression equation [TFBM case--delta2]
+
+ xtemp3   = recserar(uxtemp3,uxtemp3[1],1);  // regressor is partial sum of LM inputs [TFBM case--delta3]
+ ysintemp3 = sin(pi*xtemp3)-sin(2*pi*xtemp3)/4+sin(3*pi*xtemp3)/9-sin(4*pi*xtemp3)/16;
+ ytemp3 = b*ysintemp3 + sig*uy;                // cointegrated regression equation [TFBM case--delta3]
+
+ xtemp4   = recserar(uxtemp4,uxtemp4[1],1);  // regressor is partial sum of LM inputs [TFBM case--delta4]
+ ysintemp4 = sin(pi*xtemp4)-sin(2*pi*xtemp4)/4+sin(3*pi*xtemp4)/9-sin(4*pi*xtemp4)/16;
+ ytemp4 = b*ysintemp4 + sig*uy;                // cointegrated regression equation [TFBM case--delta4]   
+      
+  //raw case [for the comparison] 
+  xf  = seqa(0,1/nm,nm); //interval [0,1]
+  yff = sin(pi*xf)-sin(2*pi*xf)/4+sin(3*pi*xf)/9-sin(4*pi*xf)/16;
+  
+  //minimization [FBM case]
+  thetaN = QNminimize(y,x);
+
+  {ghat1,denom1}  = kregepan(y,x,xf,hpower2); 
+  {ghat2,denom2}  = kregepan(y,x,xf,hpower4);
+  
+  {ghattemp1a,denomtemp1a}  = kregepan(ytemp1,xtemp1,xf,hpower2); 
+  {ghattemp1b,denomtemp1b}  = kregepan(ytemp1,xtemp1,xf,hpower4);
+  
+  {ghattemp2,denomtemp2} = kregepan(ytemp2,xtemp2,xf,hpower3);
+  {ghattemp3,denomtemp3} = kregepan(ytemp3,xtemp3,xf,hpower3);
+  {ghattemp4,denomtemp4} = kregepan(ytemp4,xtemp4,xf,hpower3);
+  
+  {kernelestimate_sub} = krdensity(x,xf,hpower,d04);
+  
+  {TNhat} = TNestimate(y,x,xf,hpower,thetaN,d04);
+  {TNlambdahat} = TNlambdaestimate(y,x,xf,hpower,thetaN,delta1,d04);
+   
+gdevn1[k,.] = yff'-ghat1';
+gghat1[k,.] = ghat1';
+
+gdevn2[k,.] = yff'-ghat2';
+gghat2[k,.] = ghat2';
+
+ gdevntemp1a[k,.]  = yff'-ghattemp1a';
+ gghattemp1a[k,.]  = ghattemp1a';
+ 
+ gdevntemp1b[k,.]  = yff'-ghattemp1b';
+ gghattemp1b[k,.]  = ghattemp1b';
+
+ gdevntemp2[k,.]  = yff'-ghattemp2';
+ gghattemp2[k,.]  = ghattemp2'; 
+
+ gdevntemp3[k,.]  = yff'-ghattemp3';
+ gghattemp3[k,.]  = ghattemp3';
+
+ gdevntemp4[k,.]  = yff'-ghattemp4';
+ gghattemp4[k,.]  = ghattemp4';
+ 
+ xfrep[k,.] = xf';
+ kernelestimate[k,.] = kernelestimate_sub';
+ 
+ gTNhat[k,.] = TNhat';
+ gTNlambdahat[k,.] = TNlambdahat';
+
+  k = k+1;
+  endo;  
+
+/*
+summary statistics for table
+*/
+// FBM case
+ gghat1 = packr(gghat1);
+ gdevn1 = packr(gdevn1);
+ meandevg1 = meanc(gdevn1);
+ stdg1     = stdc(gdevn1);
+ meanghat1 = meanc(gghat1);
+  
+ gghat2 = packr(gghat2);
+ gdevn2 = packr(gdevn2);
+ meandevg2 = meanc(gdevn2);
+ stdg2     = stdc(gdevn2);
+ meanghat2 = meanc(gghat2);
+
+// TFBM case [delta1]
+ gghattemp1a = packr(gghattemp1a);
+ gdevntemp1a = packr(gdevntemp1a);
+ meandevgtemp1a = meanc(gdevntemp1a);
+ stdgtemp1a     = stdc(gdevntemp1a);
+ meanghattemp1a = meanc(gghattemp1a);
+ 
+ gghattemp1b = packr(gghattemp1b);
+ gdevntemp1b = packr(gdevntemp1b);
+ meandevgtemp1b = meanc(gdevntemp1b);
+ stdgtemp1b     = stdc(gdevntemp1b);
+ meanghattemp1b = meanc(gghattemp1b);
+
+// Graphs
+//For Kernels
+graphset;  
+//title("Comparison of FBM and TFBM for d=0.3 and N = 800");
+_plegstr = " f(x)\000 FBM (h=N[-1/4]) \000 FBM (h=N[-1/6]) " ;
+_plegctl = { 2 5 3 1 } ;
+xlabel("");
+_pdate="";
+_pcolor = {1,1,1};
+_pltype = {6,3,4};
+_plwidth = {15,15,15};
+_pnum    = 2;
+_pnumht  = 0.21;
+_paxht   = 0.21;
+_pypmax  = 2;
+_pxpmax  = 2;
+ytics(0,1.2,0.2,1);
+xtics(0,1,0.5,1);
+xy(xf, yff~meanghat1~meanghat2); 
+
+
+// Graphs [Based on New Style]
+struct plotControl myPlot;
+myPlot = plotGetDefaults("xy");
+ 
+plotCanvasSize("px", 600 | 400);
+
+/*
+** Legend settings
+*/
+
+plotSetTextInterpreter(&myPlot, "LaTeX", "legend");
+
+leg_str = "f(x)" $|
+          "FBM (h=N^{-1/4})" $|
+          "FBM (h=N^{-1/6})";
+          
+plotSetLegend(&myPlot, leg_str, 0.35 | 0.5, 0.5);
+
+plotSetLegendFont(&myPlot, "arial", 14);
+
+plotSetLegendBkd(&myPlot, 0);
+
+/*
+** Other graph settings
+*/
+
+clrs = getColorPalette("set2", 3);
+
+plotSetLineColor(&myPlot, clrs);
+
+plotSetLineStyle(&myPlot, 1 | 2 | 3 );
+
+plotSetXTicInterval(&myPlot, 0.5, -1);
+
+plotSetYTicInterval(&myPlot, 0.2, 0);
+
+plotSetYrange(&myPlot, 0, 1.2);
+plotSetXrange(&myPlot, 0, 1.0);
+ 
+plotSetTicLabelFont(&myPlot, "arial", 14);
+
+plotXY(myPlot, xf, yff~meanghat1~meanghat2);
+
+
+
+
+
+
+
+
+
+
+
+
+
