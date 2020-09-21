@@ -1,0 +1,805 @@
+/*
+**
+** Simulation program for "PIVOTAL TEST STATISTIC FOR NON-PARAMETRIC COINTEGRATING REGRESSION FUNCTION WITH
+** ENDOGENEITY AND SEMI-LONG MEMORY"
+**
+** Author: Sepideh Mosaferi; Date: Feb 2020
+**
+** Confidence Interval for f(x)-- FBM case
+**
+*/
+new;
+library pgraph;
+  pqgwin many;
+
+proc( 2 ) =  kreg(y,x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n    = rows(y);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = pdfn(arg);
+  denom = sumc(ker');
+  ghat  = (ker*y)./sumc(ker');
+retp(ghat,denom);
+endp;
+
+proc( 2 ) =  kregepan(y,x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n    = rows(y);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = epan(arg);
+  denom = sumc(ker');
+  ghat  = (ker*y)./sumc(ker');
+retp(ghat,denom);
+endp;  
+
+proc  ( 1 ) = krdensity(x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n     = rows(x);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = epan(arg);
+  denom =  sumc(ker');
+retp(denom);
+endp;
+
+// Minimization Alg. to find theta_hat
+proc ( 1 ) = QNminimize(y,x);
+local n,thetaN;
+n = rows(y);
+thetaN = sumc(y .* exp(x) ./ (1+exp(x)))/sumc((exp(x) ./ (1+exp(x)))^2);
+retp(thetaN);
+endp;   
+
+// sigma^2_N estimate
+proc ( 1 ) = SIGMA2_N(y,x,xf,thetaN,hpower);
+local n,m,tvec,gam,arg,ker,gxtheta,sigma2,T_N;
+n = rows(y);
+m = rows(xf);
+tvec = x;   
+gam = 1/n^hpower;    
+arg = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+ker = epan(arg);    
+gxtheta = thetaN*exp(x) ./ (1+exp(x));
+T_N = ker .* ((y-gxtheta)')^2;    
+sigma2 = sumc(T_N') ./sumc(ker');
+retp(sigma2);
+endp;    
+
+
+// proc to generate LM data by looping [FBM case]
+
+proc dsim(u,d);
+/*
+** simulate I(d) data
+** input  = u
+** output = (I-L)^-d u
+*/
+local nn,y,b0,k,b,ur;
+nn= rows(u);
+b = zeros(nn,1);
+y = zeros(nn,1);
+b0=1;          
+k =1;
+do until k>nn;
+   if k==1;
+      b[k]=d;
+   else;   
+      b[k]=(k+d-1)*b[k-1]/k;
+   endif;
+   k = k+1;
+endo;  
+b=b0|b;
+k =1;
+do until k>nn;
+   ur   = rev(u[1:k]);   
+   y[k] = b[1:k]'ur;
+   k = k+1;
+endo;   
+retp(y);
+endp;
+
+
+/* main program   */
+ library gauss pgraph;
+  pqgwin many;
+
+
+fn epan(r) = 0.75*(1-r^2).*(abs(r) .le 1);
+   
+   seed1  = 78912342;
+   iter   = 10000;             @ # iterations  @
+   numh   = {500,600,800,1000,5000}; @ sample size selections @
+   nm     = 100;            @ number of points of function evaluation @
+   
+d0 = 0;          @ value of d @
+d01 = 0.1;
+d02 = 0.2;
+d03 = 0.3;
+d04 = 0.4;
+
+
+aa     = 0.25; 	       @ AR coefficient for equation error AR model @
+rho    = 0.5;          @ correlation between ux and uy for endogeneity @ 
+	b  = 1;            @ regression coefficient @	
+   sig = 0.2;              @ error standard deviation @
+   
+   hpower  = 1/3;   @ value of bandwidth @
+   hpower2 = 1/4;   
+   hpower3 = 1/5;
+   hpower4 = 1/6;
+   
+   delta1 = 1/3;   @ value of tempering @
+   delta2 = 1/4;
+   delta3 = 1/5;
+   delta4 = 1/6;
+
+"LM d = " d0;
+"rho = " rho;
+"endogeneity correlation = " rho;
+"equation st. error = " sig;
+"AR coefficient for u_y = " aa;
+
+// sample size selection  
+  nn = numh[4]; 
+
+  gdevnd0  = zeros(iter,nm);
+  gghatd0  = zeros(iter,nm);
+  denom_gghatd0 = zeros(iter,nm);
+  SIGMA2fd0 = zeros(iter,nm);
+  
+  gdevnd01  = zeros(iter,nm);
+  gghatd01  = zeros(iter,nm);
+  denom_gghatd01 = zeros(iter,nm);
+  SIGMA2fd01 = zeros(iter,nm);
+  
+  gdevnd03  = zeros(iter,nm);
+  gghatd03  = zeros(iter,nm);
+  denom_gghatd03 = zeros(iter,nm);
+  SIGMA2fd03 = zeros(iter,nm);
+  
+  gdevnd04  = zeros(iter,nm);
+  gghatd04  = zeros(iter,nm);
+  denom_gghatd04 = zeros(iter,nm);
+  SIGMA2fd04 = zeros(iter,nm);
+  
+
+  k = 1;
+  do until k > iter;            @ loop for simulation @
+	  
+  ux  = rndns(nn,1,seed1);    // regressor error  
+  uy  = rndns(nn,1,seed1);           // equation error
+  ux  = ((1-rho^2)^0.5) *ux + rho*uy;  // endogeneity correlation = rho 
+  uy  = recserar(uy,uy[1],aa);  @ converts equation error to AR(1) errors @    
+      
+  uxd0  = dsim(ux,d0);  // generate LM inputs for regressor [FBM case:d0]
+  uxd01  = dsim(ux,d01);  // generate LM inputs for regressor [FBM case:d01]    
+  uxd03  = dsim(ux,d03);  // generate LM inputs for regressor [FBM case:d03]
+  uxd04  = dsim(ux,d04);  // generate LM inputs for regressor [FBM case:d04] 
+      
+ //x and y
+ xd0   = recserar(uxd0,uxd0[1],1);  // regressor is partial sum of LM inputs [FBM case:d0]
+ ysind0 = sin(pi*xd0)-sin(2*pi*xd0)/4+sin(3*pi*xd0)/9-sin(4*pi*xd0)/16;
+ yd0 = b*ysind0 + sig*uy;                // cointegrated regression equation [FBM case:d0]
+      
+ xd01   = recserar(uxd01,uxd01[1],1);  // regressor is partial sum of LM inputs [FBM case:d01]
+ ysind01 = sin(pi*xd01)-sin(2*pi*xd01)/4+sin(3*pi*xd01)/9-sin(4*pi*xd01)/16;
+ yd01 = b*ysind01 + sig*uy;                // cointegrated regression equation [FBM case:d01]
+      
+ xd03   = recserar(uxd03,uxd03[1],1);  // regressor is partial sum of LM inputs [FBM case:d03]
+ ysind03 = sin(pi*xd03)-sin(2*pi*xd03)/4+sin(3*pi*xd03)/9-sin(4*pi*xd03)/16;
+ yd03 = b*ysind03 + sig*uy;                // cointegrated regression equation [FBM case:d03]     
+ 
+ xd04   = recserar(uxd04,uxd04[1],1);  // regressor is partial sum of LM inputs [FBM case:d04]
+ ysind04 = sin(pi*xd04)-sin(2*pi*xd04)/4+sin(3*pi*xd04)/9-sin(4*pi*xd04)/16;
+ yd04 = b*ysind04 + sig*uy;                // cointegrated regression equation [FBM case:d04]
+      
+      
+  //raw case [for the comparison] 
+  xf  = seqa(0,1/nm,nm); //interval [0,1]
+  yff = sin(pi*xf)-sin(2*pi*xf)/4+sin(3*pi*xf)/9-sin(4*pi*xf)/16;
+  
+  //minimization [FBM case]
+  thetaNd0 = QNminimize(yd0,xd0);
+  thetaNd01 = QNminimize(yd01,xd01);
+  thetaNd03 = QNminimize(yd03,xd03);
+  thetaNd04 = QNminimize(yd04,xd04);
+  
+
+  {sigma2Nd0}     = SIGMA2_N(yd0,xd0,xf,thetaNd0,hpower);      
+  {ghatd0,denomd0}  = kregepan(yd0,xd0,xf,hpower);    
+    {denom_CId0}  = krdensity(xd0,xf,hpower);
+      
+  {sigma2Nd01}     = SIGMA2_N(yd01,xd01,xf,thetaNd01,hpower);      
+  {ghatd01,denomd01}  = kregepan(yd01,xd01,xf,hpower);    
+    {denom_CId01}  = krdensity(xd01,xf,hpower); 
+    
+  {sigma2Nd03}     = SIGMA2_N(yd03,xd03,xf,thetaNd03,hpower);      
+  {ghatd03,denomd03}  = kregepan(yd03,xd03,xf,hpower);    
+    {denom_CId03}  = krdensity(xd03,xf,hpower);
+    
+  {sigma2Nd04}     = SIGMA2_N(yd04,xd04,xf,thetaNd04,hpower);      
+  {ghatd04,denomd04}  = kregepan(yd04,xd04,xf,hpower);    
+    {denom_CId04}  = krdensity(xd04,xf,hpower);  
+          
+   
+gdevnd0[k,.] = yff'-ghatd0';
+gghatd0[k,.] = ghatd0';
+denom_gghatd0[k,.] = denom_CId0';
+SIGMA2fd0[k,.]= sigma2Nd0';
+
+gdevnd01[k,.] = yff'-ghatd01';
+gghatd01[k,.] = ghatd01';
+denom_gghatd01[k,.] = denom_CId01';
+SIGMA2fd01[k,.]= sigma2Nd01';
+
+gdevnd03[k,.] = yff'-ghatd03';
+gghatd03[k,.] = ghatd03';
+denom_gghatd03[k,.] = denom_CId03';
+SIGMA2fd03[k,.]= sigma2Nd03';
+
+gdevnd04[k,.] = yff'-ghatd04';
+gghatd04[k,.] = ghatd04';
+denom_gghatd04[k,.] = denom_CId04';
+SIGMA2fd04[k,.]= sigma2Nd04';
+
+  k = k+1;
+  endo;  
+
+/*
+summary statistics for table
+*/
+// FBM case 
+ gghatd0 = packr(gghatd0);
+ gdevnd0 = packr(gdevnd0);
+ meandevgd0 = meanc(gdevnd0);
+ stdgd0     = stdc(gdevnd0);
+ meanghatd0 = meanc(gghatd0);
+ denom_gghatd0 = packr(denom_gghatd0);
+ meandenom_gghatd0 = meanc(denom_gghatd0); 
+ SIGMA2fd0 = packr(SIGMA2fd0);
+ meanSIGMA2fd0 = meanc(SIGMA2fd0); 
+  
+ CI_upmeand0 = meanghatd0+1.96*sqrt((meanSIGMA2fd0*0.3) ./ (0.5*meandenom_gghatd0)); 
+ CI_lowmeand0 = meanghatd0-1.96*sqrt((meanSIGMA2fd0*0.3) ./ (0.5*meandenom_gghatd0));  
+  
+ gghatd01 = packr(gghatd01);
+ gdevnd01 = packr(gdevnd01);
+ meandevgd01 = meanc(gdevnd01);
+ stdgd01     = stdc(gdevnd01);
+ meanghatd01 = meanc(gghatd01);
+ denom_gghatd01 = packr(denom_gghatd01);
+ meandenom_gghatd01 = meanc(denom_gghatd01); 
+ SIGMA2fd01 = packr(SIGMA2fd01);
+ meanSIGMA2fd01 = meanc(SIGMA2fd01); 
+  
+ CI_upmeand01 = meanghatd01+1.96*sqrt((meanSIGMA2fd01*0.3) ./ (0.5*meandenom_gghatd01)); 
+ CI_lowmeand01 = meanghatd01-1.96*sqrt((meanSIGMA2fd01*0.3) ./ (0.5*meandenom_gghatd01));
+
+ gghatd03 = packr(gghatd03);
+ gdevnd03 = packr(gdevnd03);
+ meandevgd03 = meanc(gdevnd03);
+ stdgd03     = stdc(gdevnd03);
+ meanghatd03 = meanc(gghatd03);
+ denom_gghatd03 = packr(denom_gghatd03);
+ meandenom_gghatd03 = meanc(denom_gghatd03); 
+ SIGMA2fd03 = packr(SIGMA2fd03);
+ meanSIGMA2fd03 = meanc(SIGMA2fd03); 
+  
+ CI_upmeand03 = meanghatd03+1.96*sqrt((meanSIGMA2fd03*0.3) ./ (0.5*meandenom_gghatd03)); 
+ CI_lowmeand03 = meanghatd03-1.96*sqrt((meanSIGMA2fd03*0.3) ./ (0.5*meandenom_gghatd03));
+
+ gghatd04 = packr(gghatd04);
+ gdevnd04 = packr(gdevnd04);
+ meandevgd04 = meanc(gdevnd04);
+ stdgd04     = stdc(gdevnd04);
+ meanghatd04 = meanc(gghatd04);
+ denom_gghatd04 = packr(denom_gghatd04);
+ meandenom_gghatd04 = meanc(denom_gghatd04); 
+ SIGMA2fd04 = packr(SIGMA2fd04);
+ meanSIGMA2fd04 = meanc(SIGMA2fd04); 
+  
+ CI_upmeand04 = meanghatd04+1.96*sqrt((meanSIGMA2fd04*0.3) ./ (0.5*meandenom_gghatd04)); 
+ CI_lowmeand04 = meanghatd04-1.96*sqrt((meanSIGMA2fd04*0.3) ./ (0.5*meandenom_gghatd04));  
+
+
+// Average Length 
+// FBM case
+print;
+ "average-length.FBMd0 = " meanc((CI_upmeand0)-(CI_lowmeand0));
+ "average-length.FBMd01 = " meanc((CI_upmeand01)-(CI_lowmeand01));
+ "average-length.FBMd03 = " meanc((CI_upmeand03)-(CI_lowmeand03));
+ "average-length.FBMd04 = " meanc((CI_upmeand04)-(CI_lowmeand04));
+
+// Graphs
+//For Confidence Intervals
+graphset;  
+//_plegstr = " f(x)\000 d=0 \000 d=0.1 \000 d=0.3 \000 d=0.4  " ;
+//_plegctl = { 2 4.5 6 3 } ;
+xlabel("Long Memory");
+_pdate="";
+_pcolor = {1,1,1,1,1,1,1,1,1};
+_pltype = {6,3,4,1,2,3,4,1,2};
+_plwidth = {15,15,15,15,15,15,15,15,15};
+_pnum    = 2;
+_pnumht  = 0.21;
+_paxht   = 0.21;
+_pypmax  = 2;
+_pxpmax  = 2;
+ytics(-2,4,2,1);
+xtics(0,1,0.5,1);
+xy(xf, yff~CI_upmeand0~CI_upmeand01~CI_upmeand03~CI_upmeand04~CI_lowmeand0~CI_lowmeand01~CI_lowmeand03~CI_lowmeand04); 
+
+
+// Graphs [Based on New Style]
+struct plotControl myPlot;
+myPlot = plotGetDefaults("xy");
+
+plotCanvasSize("px", 600 | 400);
+ 
+/*
+** Legend settings
+*/
+ 
+plotSetTextInterpreter(&myPlot, "LaTeX", "legend");
+
+leg_str = "f(x)" $|
+          "d=0" $|
+          "d=0.1" $|
+          "d=0.3" $|
+          "d=0.4" $|
+          "" $|
+          "" $|
+          "" $|
+          "";
+
+plotSetLegend(&myPlot, leg_str, 0.05 | 6, 0.5);
+
+plotSetLegendFont(&myPlot, "arial", 14);
+ 
+plotSetLegendBkd(&myPlot, 0);
+ 
+/*
+** Other graph settings
+*/
+ 
+plotSetXLabel(&myplot, "Long Memory (LM)");
+
+clrs = getColorPalette("set2", 5);
+
+clrs = clrs[1 2 3 4 5 2 3 4 5];
+plotSetLineColor(&myPlot, clrs);
+ 
+plotSetLineStyle(&myPlot, 1 | 2 | 3 | 4 | 5 |2 |3 | 4 | 5 );
+
+plotSetXTicInterval(&myPlot, 1, -1);
+
+plotSetYTicInterval(&myPlot, 2, -2);
+plotSetXTicInterval(&myPlot, 0.5, -1);
+ 
+plotSetYrange(&myPlot, -2, 6);
+plotSetXrange(&myPlot, 0, 1.0);
+ 
+plotSetTicLabelFont(&myPlot, "arial", 14);
+
+plotXY(myPlot, xf, yff~CI_upmeand0~CI_upmeand01~CI_upmeand03~CI_upmeand04~CI_lowmeand0~CI_lowmeand01~CI_lowmeand03~CI_lowmeand04);
+
+
+
+
+/*
+**
+** Confidence Interval for f(x)-- TFBM case
+**
+*/
+new;
+library pgraph;
+  pqgwin many;
+
+proc( 2 ) =  kreg(y,x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n    = rows(y);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = pdfn(arg);
+  denom = sumc(ker');
+  ghat  = (ker*y)./sumc(ker');
+retp(ghat,denom);
+endp;
+
+proc( 2 ) =  kregepan(y,x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n    = rows(y);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = epan(arg);
+  denom = sumc(ker');
+  ghat  = (ker*y)./sumc(ker');
+retp(ghat,denom);
+endp;  
+
+proc  ( 1 ) = krdensity(x,xf,hpower);
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n     = rows(x);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = epan(arg);
+  denom =  sumc(ker');
+retp(denom);
+endp;
+
+// Minimization Alg. to find theta_hat
+proc ( 1 ) = QNminimize(y,x);
+local n,thetaN;
+n = rows(y);
+thetaN = sumc(y .* exp(x) ./ (1+exp(x)))/sumc((exp(x) ./ (1+exp(x)))^2);
+retp(thetaN);
+endp;   
+
+// sigma^2_N estimate
+proc ( 1 ) = SIGMA2_N(y,x,xf,thetaN,hpower);
+local n,m,tvec,gam,arg,ker,gxtheta,sigma2,T_N;
+n = rows(y);
+m = rows(xf);
+tvec = x;   
+gam = 1/n^hpower;    
+arg = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+ker = epan(arg);    
+gxtheta = thetaN*exp(x) ./ (1+exp(x));
+T_N = ker .* ((y-gxtheta)')^2;    
+sigma2 = sumc(T_N') ./sumc(ker');
+retp(sigma2);
+endp;    
+
+
+// proc to generate LM data by looping [TFBM case]
+
+proc dsimtemp(u,d,delta);
+/*
+** simulate I(d) data
+** input  = u
+** output = (I-e^(-lambda_N)*L)^-d u; lambda_N=1/N^delta
+*/
+local nn,y,b0,k,b,ur,temp;
+nn= rows(u);
+b = zeros(nn,1);
+y = zeros(nn,1);
+temp = exp(-1/nn^delta);    
+b0=1;          
+k =1;
+do until k>nn;
+   if k==1;
+      b[k]=temp*d;
+   else;   
+      b[k]=temp*(k+d-1)*b[k-1]/k;
+   endif;
+   k = k+1;
+endo;  
+b=b0|b;
+k =1;
+do until k>nn;
+   ur   = rev(u[1:k]);   
+   y[k] = b[1:k]'ur;
+   k = k+1;
+endo;   
+retp(y);
+endp;
+
+
+/* main program   */
+ library gauss pgraph;
+  pqgwin many;
+
+
+fn epan(r) = 0.75*(1-r^2).*(abs(r) .le 1);
+   
+   seed1  = 78912342;
+   iter   = 10000;             @ # iterations  @
+   numh   = {500,600,800,1000,5000}; @ sample size selections @
+   nm     = 100;            @ number of points of function evaluation @
+   
+d0 = 0;          @ value of d @
+d01 = 0.1;
+d02 = 0.2;
+d03 = 0.3;
+d04 = 0.4;
+
+
+aa     = 0.25; 	       @ AR coefficient for equation error AR model @
+rho    = 0.5;          @ correlation between ux and uy for endogeneity @ 
+	b  = 1;            @ regression coefficient @	
+   sig = 0.2;              @ error standard deviation @
+   
+   hpower  = 1/3;   @ value of bandwidth @
+   hpower2 = 1/4;   
+   hpower3 = 1/5;
+   hpower4 = 1/6;
+   
+   delta1 = 1/3;   @ value of tempering @
+   delta2 = 1/4;
+   delta3 = 1/5;
+   delta4 = 1/6;
+
+"LM d = " d0;
+"rho = " rho;
+"endogeneity correlation = " rho;
+"equation st. error = " sig;
+"AR coefficient for u_y = " aa;
+
+// sample size selection  
+  nn = numh[4]; 
+
+  gdevn_temp4d0  = zeros(iter,nm);
+  gghat_temp4d0  = zeros(iter,nm);
+  denom_gghat_temp4d0 = zeros(iter,nm);
+  SIGMA2f_temp4d0 = zeros(iter,nm);
+  
+  gdevn_temp4d01  = zeros(iter,nm);
+  gghat_temp4d01  = zeros(iter,nm);
+  denom_gghat_temp4d01 = zeros(iter,nm);
+  SIGMA2f_temp4d01 = zeros(iter,nm);
+  
+  gdevn_temp4d03  = zeros(iter,nm);
+  gghat_temp4d03  = zeros(iter,nm);
+  denom_gghat_temp4d03 = zeros(iter,nm);
+  SIGMA2f_temp4d03 = zeros(iter,nm);
+  
+  gdevn_temp4d04  = zeros(iter,nm);
+  gghat_temp4d04  = zeros(iter,nm);
+  denom_gghat_temp4d04 = zeros(iter,nm);
+  SIGMA2f_temp4d04 = zeros(iter,nm);
+
+  
+  k = 1;
+  do until k > iter;            @ loop for simulation @
+	  
+  ux  = rndns(nn,1,seed1);    // regressor error  
+  uy  = rndns(nn,1,seed1);           // equation error
+  ux  = ((1-rho^2)^0.5) *ux + rho*uy;  // endogeneity correlation = rho 
+  uy  = recserar(uy,uy[1],aa);  @ converts equation error to AR(1) errors @    
+      
+  uxtemp4d0 = dsimtemp(ux,d0,delta4);  // generate LM inputs for regressor [TFBM case: d0]   
+  uxtemp4d01 = dsimtemp(ux,d01,delta4);  // generate LM inputs for regressor [TFBM case: d01]  
+  uxtemp4d03 = dsimtemp(ux,d03,delta4);  // generate LM inputs for regressor [TFBM case: d03]  
+  uxtemp4d04 = dsimtemp(ux,d04,delta4);  // generate LM inputs for regressor [TFBM case: d04]     
+      
+ //x and y
+ xtemp4d0   = recserar(uxtemp4d0,uxtemp4d0[1],1);  // regressor is partial sum of LM inputs [TFBM case--d0]
+ ysintemp4d0 = sin(pi*xtemp4d0)-sin(2*pi*xtemp4d0)/4+sin(3*pi*xtemp4d0)/9-sin(4*pi*xtemp4d0)/16;
+ ytemp4d0 = b*ysintemp4d0 + sig*uy;                // cointegrated regression equation [TFBM case--d0]    
+      
+ xtemp4d01   = recserar(uxtemp4d01,uxtemp4d01[1],1);  // regressor is partial sum of LM inputs [TFBM case--d01]
+ ysintemp4d01 = sin(pi*xtemp4d01)-sin(2*pi*xtemp4d01)/4+sin(3*pi*xtemp4d01)/9-sin(4*pi*xtemp4d01)/16;
+ ytemp4d01 = b*ysintemp4d01 + sig*uy;                // cointegrated regression equation [TFBM case--d01]
+
+ xtemp4d03   = recserar(uxtemp4d03,uxtemp4d03[1],1);  // regressor is partial sum of LM inputs [TFBM case--d03]
+ ysintemp4d03 = sin(pi*xtemp4d03)-sin(2*pi*xtemp4d03)/4+sin(3*pi*xtemp4d03)/9-sin(4*pi*xtemp4d03)/16;
+ ytemp4d03 = b*ysintemp4d03 + sig*uy;                // cointegrated regression equation [TFBM case--d03]
+
+ xtemp4d04   = recserar(uxtemp4d04,uxtemp4d04[1],1);  // regressor is partial sum of LM inputs [TFBM case--d04]
+ ysintemp4d04 = sin(pi*xtemp4d04)-sin(2*pi*xtemp4d04)/4+sin(3*pi*xtemp4d04)/9-sin(4*pi*xtemp4d04)/16;
+ ytemp4d04 = b*ysintemp4d04 + sig*uy;                // cointegrated regression equation [TFBM case--d04]
+      
+      
+  //raw case [for the comparison] 
+  xf  = seqa(0,1/nm,nm); //interval [0,1]
+  yff = sin(pi*xf)-sin(2*pi*xf)/4+sin(3*pi*xf)/9-sin(4*pi*xf)/16;
+  
+  //minimization [TFBM case]
+  thetaN_temp4d0 = QNminimize(ytemp4d0,xtemp4d0);
+  thetaN_temp4d01 = QNminimize(ytemp4d01,xtemp4d01);
+  thetaN_temp4d03 = QNminimize(ytemp4d03,xtemp4d03);
+  thetaN_temp4d04 = QNminimize(ytemp4d04,xtemp4d04);
+      
+  {sigma2N_temp4d0} = SIGMA2_N(ytemp4d0,xtemp4d0,xf,thetaN_temp4d0,hpower);  
+  {sigma2N_temp4d01} = SIGMA2_N(ytemp4d01,xtemp4d01,xf,thetaN_temp4d01,hpower);  
+  {sigma2N_temp4d03} = SIGMA2_N(ytemp4d03,xtemp4d03,xf,thetaN_temp4d03,hpower);  
+  {sigma2N_temp4d04} = SIGMA2_N(ytemp4d04,xtemp4d04,xf,thetaN_temp4d04,hpower);  
+  
+  {ghattemp4d0,denomtemp4d0} = kregepan(ytemp4d0,xtemp4d0,xf,hpower); 
+  {ghattemp4d01,denomtemp4d01} = kregepan(ytemp4d01,xtemp4d01,xf,hpower);
+  {ghattemp4d03,denomtemp4d03} = kregepan(ytemp4d03,xtemp4d03,xf,hpower);
+  {ghattemp4d04,denomtemp4d04} = kregepan(ytemp4d04,xtemp4d04,xf,hpower);
+  
+  
+  {denom_CI_temp4d0}  = krdensity(xtemp4d0,xf,hpower);
+  {denom_CI_temp4d01}  = krdensity(xtemp4d01,xf,hpower);
+  {denom_CI_temp4d03}  = krdensity(xtemp4d03,xf,hpower);
+  {denom_CI_temp4d04}  = krdensity(xtemp4d04,xf,hpower);
+          
+   
+gdevn_temp4d0[k,.] = yff'-ghattemp4d0';
+gghat_temp4d0[k,.] = ghattemp4d0';
+denom_gghat_temp4d0[k,.] = denom_CI_temp4d0';
+SIGMA2f_temp4d0[k,.]= sigma2N_temp4d0';
+
+gdevn_temp4d01[k,.] = yff'-ghattemp4d01';
+gghat_temp4d01[k,.] = ghattemp4d01';
+denom_gghat_temp4d01[k,.] = denom_CI_temp4d01';
+SIGMA2f_temp4d01[k,.]= sigma2N_temp4d01';
+
+gdevn_temp4d03[k,.] = yff'-ghattemp4d03';
+gghat_temp4d03[k,.] = ghattemp4d03';
+denom_gghat_temp4d03[k,.] = denom_CI_temp4d03';
+SIGMA2f_temp4d03[k,.]= sigma2N_temp4d03';
+
+gdevn_temp4d04[k,.] = yff'-ghattemp4d04';
+gghat_temp4d04[k,.] = ghattemp4d04';
+denom_gghat_temp4d04[k,.] = denom_CI_temp4d04';
+SIGMA2f_temp4d04[k,.]= sigma2N_temp4d04';
+
+  k = k+1;
+  endo;  
+
+/*
+summary statistics for table
+*/
+// TFBM case [d0]
+ gghat_temp4d0 = packr(gghat_temp4d0);
+ gdevn_temp4d0 = packr(gdevn_temp4d0);
+ meandevg_temp4d0 = meanc(gdevn_temp4d0);
+ stdg_temp4d0     = stdc(gdevn_temp4d0);
+ meanghat_temp4d0 = meanc(gghat_temp4d0);
+ 
+ denom_gghat_temp4d0 = packr(denom_gghat_temp4d0);
+ meandenom_gghat_temp4d0 = meanc(denom_gghat_temp4d0); 
+  
+ SIGMA2f_temp4d0 = packr(SIGMA2f_temp4d0);
+ meanSIGMA2f_temp4d0 = meanc(SIGMA2f_temp4d0); 
+  
+ CI_upmean_temp4d0 = meanghat_temp4d0+1.96*sqrt((meanSIGMA2f_temp4d0*0.3) ./ (0.5*meandenom_gghat_temp4d0)); 
+ CI_lowmean_temp4d0 = meanghat_temp4d0-1.96*sqrt((meanSIGMA2f_temp4d0*0.3) ./ (0.5*meandenom_gghat_temp4d0));  
+  
+  
+// TFBM case [d01]
+ gghat_temp4d01 = packr(gghat_temp4d01);
+ gdevn_temp4d01 = packr(gdevn_temp4d01);
+ meandevg_temp4d01 = meanc(gdevn_temp4d01);
+ stdg_temp4d01     = stdc(gdevn_temp4d01);
+ meanghat_temp4d01 = meanc(gghat_temp4d01);
+ 
+ denom_gghat_temp4d01 = packr(denom_gghat_temp4d01);
+ meandenom_gghat_temp4d01 = meanc(denom_gghat_temp4d01); 
+  
+ SIGMA2f_temp4d01 = packr(SIGMA2f_temp4d01);
+ meanSIGMA2f_temp4d01 = meanc(SIGMA2f_temp4d01); 
+  
+ CI_upmean_temp4d01 = meanghat_temp4d01+1.96*sqrt((meanSIGMA2f_temp4d01*0.3) ./ (0.5*meandenom_gghat_temp4d01)); 
+ CI_lowmean_temp4d01 = meanghat_temp4d01-1.96*sqrt((meanSIGMA2f_temp4d01*0.3) ./ (0.5*meandenom_gghat_temp4d01));  
+  
+
+// TFBM case [d03]
+ gghat_temp4d03 = packr(gghat_temp4d03);
+ gdevn_temp4d03 = packr(gdevn_temp4d03);
+ meandevg_temp4d03 = meanc(gdevn_temp4d03);
+ stdg_temp4d03     = stdc(gdevn_temp4d03);
+ meanghat_temp4d03 = meanc(gghat_temp4d03);
+ 
+ denom_gghat_temp4d03 = packr(denom_gghat_temp4d03);
+ meandenom_gghat_temp4d03 = meanc(denom_gghat_temp4d03); 
+  
+ SIGMA2f_temp4d03 = packr(SIGMA2f_temp4d03);
+ meanSIGMA2f_temp4d03 = meanc(SIGMA2f_temp4d03); 
+  
+ CI_upmean_temp4d03 = meanghat_temp4d03+1.96*sqrt((meanSIGMA2f_temp4d03*0.3) ./ (0.5*meandenom_gghat_temp4d03)); 
+ CI_lowmean_temp4d03 = meanghat_temp4d03-1.96*sqrt((meanSIGMA2f_temp4d03*0.3) ./ (0.5*meandenom_gghat_temp4d03));  
+  
+
+
+// TFBM case [d04]
+ gghat_temp4d04 = packr(gghat_temp4d04);
+ gdevn_temp4d04 = packr(gdevn_temp4d04);
+ meandevg_temp4d04 = meanc(gdevn_temp4d04);
+ stdg_temp4d04     = stdc(gdevn_temp4d04);
+ meanghat_temp4d04 = meanc(gghat_temp4d04);
+ 
+ denom_gghat_temp4d04 = packr(denom_gghat_temp4d04);
+ meandenom_gghat_temp4d04 = meanc(denom_gghat_temp4d04); 
+  
+ SIGMA2f_temp4d04 = packr(SIGMA2f_temp4d04);
+ meanSIGMA2f_temp4d04 = meanc(SIGMA2f_temp4d04); 
+  
+ CI_upmean_temp4d04 = meanghat_temp4d04+1.96*sqrt((meanSIGMA2f_temp4d04*0.3) ./ (0.5*meandenom_gghat_temp4d04)); 
+ CI_lowmean_temp4d04 = meanghat_temp4d04-1.96*sqrt((meanSIGMA2f_temp4d04*0.3) ./ (0.5*meandenom_gghat_temp4d04));  
+  
+
+
+// Average Length 
+// TFBM case
+print;
+ "average-length.TFBMd0 = " meanc((CI_upmean_temp4d0)-(CI_lowmean_temp4d0));
+ "average-length.TFBMd01 = " meanc((CI_upmean_temp4d01)-(CI_lowmean_temp4d01));
+ "average-length.TFBMd03 = " meanc((CI_upmean_temp4d03)-(CI_lowmean_temp4d03));
+ "average-length.TFBMd04 = " meanc((CI_upmean_temp4d04)-(CI_lowmean_temp4d04));
+
+
+// Graphs
+//For Confidence Intervals
+graphset;  
+_plegstr = " f(x)\000 d=0 \000 d=0.1 \000 d=0.3 \000 d=0.4 \000  \000  \000  \000  " ;
+//_plegctl = { 2 4.5 3.5 1 } ;
+xlabel("Semi-Long Memory");
+_pdate="";
+_pcolor = {1,1,1,1,1,1,1,1,1};
+_pltype = {6,3,4,1,2,3,4,1,2};
+_plwidth = {15,15,15,15,15,15,15,15,15};
+_pnum    = 2;
+_pnumht  = 0.21;
+_paxht   = 0.21;
+_pypmax  = 2;
+_pxpmax  = 2;
+ytics(-2,4,2,1);
+xtics(0,1,0.5,1);
+xy(xf, yff~CI_upmean_temp4d0~CI_upmean_temp4d01~CI_upmean_temp4d03~CI_upmean_temp4d04
+~CI_lowmean_temp4d0~CI_lowmean_temp4d01~CI_lowmean_temp4d03~CI_lowmean_temp4d04); 
+
+
+// Graphs [Based on New Style]
+struct plotControl myPlot;
+myPlot = plotGetDefaults("xy");
+
+plotCanvasSize("px", 600 | 400);
+ 
+/*
+** Legend settings
+*/
+ 
+plotSetTextInterpreter(&myPlot, "LaTeX", "legend");
+
+leg_str = "f(x)" $|
+          "d=0" $|
+          "d=0.1" $|
+          "d=0.3" $|
+          "d=0.4" $|
+          "" $|
+          "" $|
+          "" $|
+          "";
+
+plotSetLegend(&myPlot, leg_str, 0.05 | 6, 0.5);
+
+plotSetLegendFont(&myPlot, "arial", 14);
+ 
+plotSetLegendBkd(&myPlot, 0);
+ 
+/*
+** Other graph settings
+*/
+ 
+plotSetXLabel(&myplot, "Semi-Long Memory (SLM)");
+
+clrs = getColorPalette("set2", 5);
+
+clrs = clrs[1 2 3 4 5 2 3 4 5];
+plotSetLineColor(&myPlot, clrs);
+ 
+plotSetLineStyle(&myPlot, 1 | 2 | 3 | 4 | 5 |2 |3 | 4 | 5 );
+
+plotSetXTicInterval(&myPlot, 1, -1);
+
+plotSetYTicInterval(&myPlot, 2, -2);
+plotSetXTicInterval(&myPlot, 0.5, -1);
+ 
+plotSetYrange(&myPlot, -2, 6);
+plotSetXrange(&myPlot, 0, 1.0);
+ 
+plotSetTicLabelFont(&myPlot, "arial", 14);
+
+plotXY(myPlot, xf, yff~CI_upmean_temp4d0~CI_upmean_temp4d01~CI_upmean_temp4d03~CI_upmean_temp4d04
+~CI_lowmean_temp4d0~CI_lowmean_temp4d01~CI_lowmean_temp4d03~CI_lowmean_temp4d04);
+
+
+
