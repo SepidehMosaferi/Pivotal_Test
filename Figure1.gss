@@ -1,0 +1,619 @@
+/*
+**
+** Simulation program for "PIVOTAL TEST STATISTIC FOR NON-PARAMETRIC COINTEGRATING REGRESSION FUNCTION WITH
+** ENDOGENEITY AND SEMI-LONG MEMORY"
+**
+** Author: Sepideh Mosaferi; Date: Feb 2020
+**
+** Local Time of f(x)-- FBM case
+**
+*/
+new;
+library pgraph;
+  pqgwin many;
+
+ 
+
+proc  ( 1 ) = krdensity(x,xf,hpower,d);  //Local Time estimate [FBM case]
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n     = rows(x);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = pdfn(arg);
+  denom =  sumc(ker')/((n^(0.5-d))*gam);
+retp(denom);
+endp;
+
+proc  ( 1 ) = krdensitytemp(x,xf,hpower,d,delta);  //Local Time estimate [TFBM case]
+local n,tvec,gam,arg,ker,ghat,m,temp,denom;
+  n     = rows(x);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = pdfn(arg);
+  temp = n^(-delta*d);   
+  denom =  sumc(ker')/((n^0.5)*gam*temp);
+retp(denom);
+endp;
+
+
+// proc to generate LM data by looping [FBM case]
+
+proc dsim(u,d);
+/*
+** simulate I(d) data
+** input  = u
+** output = (I-L)^-d u
+*/
+local nn,y,b0,k,b,ur;
+nn= rows(u);
+b = zeros(nn,1);
+y = zeros(nn,1);
+b0=1;          
+k =1;
+do until k>nn;
+   if k==1;
+      b[k]=d;
+   else;   
+      b[k]=(k+d-1)*b[k-1]/k;
+   endif;
+   k = k+1;
+endo;  
+b=b0|b;
+k =1;
+do until k>nn;
+   ur   = rev(u[1:k]);   
+   y[k] = b[1:k]'ur;
+   k = k+1;
+endo;   
+retp(y);
+endp;
+
+// proc to generate LM data by looping [TFBM case]
+
+proc dsimtemp(u,d,delta);
+/*
+** simulate I(d) data
+** input  = u
+** output = (I-e^(-lambda_N)*L)^-d u; lambda_N=1/N^delta
+*/
+local nn,y,b0,k,b,ur,temp;
+nn= rows(u);
+b = zeros(nn,1);
+y = zeros(nn,1);
+temp = exp(-1/nn^delta);    
+b0=1;          
+k =1;
+do until k>nn;
+   if k==1;
+      b[k]=temp*d;
+   else;   
+      b[k]=temp*(k+d-1)*b[k-1]/k;
+   endif;
+   k = k+1;
+endo;  
+b=b0|b;
+k =1;
+do until k>nn;
+   ur   = rev(u[1:k]);   
+   y[k] = b[1:k]'ur;
+   k = k+1;
+endo;   
+retp(y);
+endp;
+
+
+/* main program   */
+ library gauss pgraph;
+  pqgwin many;
+
+
+fn epan(r) = 0.75*(1-r^2).*(abs(r) .le 1);
+   
+   seed1  = 78912342;
+   iter   = 10000;             @ # iterations  @
+   numh   = {800,1000,5000,10000}; @ sample size selections @
+   nm     = 100;            @ number of points of function evaluation @
+   
+d0 = 0;          @ value of d @
+d01 = 0.1;
+d02 = 0.2;
+d03 = 0.3;
+d04 = 0.4;
+
+
+aa     = 0.25; 	       @ AR coefficient for equation error AR model @
+rho    = 0.5;          @ correlation between ux and uy for endogeneity @ 
+	b  = 1;            @ regression coefficient @	
+   sig = 0.2;              @ error standard deviation @
+   
+   hpower  = 1/3;   @ value of bandwidth @
+   hpower2 = 1/4;   
+   hpower3 = 1/5;
+   hpower4 = 1/6;
+   
+   delta1 = 1/3;   @ value of tempering @
+   delta2 = 1/4;
+   delta3 = 1/5;
+   delta4 = 1/6;
+
+"LM d = " d0;
+"rho = " rho;
+"endogeneity correlation = " rho;
+"equation st. error = " sig;
+"AR coefficient for u_y = " aa;
+
+// sample size selection  
+  nn = numh[2]; 
+
+  localtime_hpower4d0  = zeros(iter,nm);
+  localtime_hpower4d01  = zeros(iter,nm);
+  localtime_hpower4d03  = zeros(iter,nm);
+  localtime_hpower4d04  = zeros(iter,nm);
+  
+  xfrep = zeros(iter,nm);
+  
+  k = 1;
+  do until k > iter;            @ loop for simulation @
+	  
+  ux  = rndns(nn,1,seed1);    // regressor error  
+  uy  = rndns(nn,1,seed1);           // equation error
+  ux  = ((1-rho^2)^0.5) *ux + rho*uy;  // endogeneity correlation = rho 
+  uy  = recserar(uy,uy[1],aa);  @ converts equation error to AR(1) errors @
+
+  uxd0  = dsim(ux,d0);  // generate LM inputs for regressor [FBM case:d0]
+  uxd01  = dsim(ux,d01);  // generate LM inputs for regressor [FBM case:d01]    
+  uxd03  = dsim(ux,d03);  // generate LM inputs for regressor [FBM case:d03]
+  uxd04  = dsim(ux,d04);  // generate LM inputs for regressor [FBM case:d04]    
+      
+ //x and y
+ xd0   = recserar(uxd0,uxd0[1],1);  // regressor is partial sum of LM inputs [FBM case:d0]
+ ysind0 = sin(pi*xd0)-sin(2*pi*xd0)/4+sin(3*pi*xd0)/9-sin(4*pi*xd0)/16;
+ yd0 = b*ysind0 + sig*uy;                // cointegrated regression equation [FBM case:d0]
+      
+ xd01   = recserar(uxd01,uxd01[1],1);  // regressor is partial sum of LM inputs [FBM case:d01]
+ ysind01 = sin(pi*xd01)-sin(2*pi*xd01)/4+sin(3*pi*xd01)/9-sin(4*pi*xd01)/16;
+ yd01 = b*ysind01 + sig*uy;                // cointegrated regression equation [FBM case:d01]
+      
+ xd03   = recserar(uxd03,uxd03[1],1);  // regressor is partial sum of LM inputs [FBM case:d03]
+ ysind03 = sin(pi*xd03)-sin(2*pi*xd03)/4+sin(3*pi*xd03)/9-sin(4*pi*xd03)/16;
+ yd03 = b*ysind03 + sig*uy;                // cointegrated regression equation [FBM case:d03]     
+ 
+ xd04   = recserar(uxd04,uxd04[1],1);  // regressor is partial sum of LM inputs [FBM case:d04]
+ ysind04 = sin(pi*xd04)-sin(2*pi*xd04)/4+sin(3*pi*xd04)/9-sin(4*pi*xd04)/16;
+ yd04 = b*ysind04 + sig*uy;                // cointegrated regression equation [FBM case:d04]
+      
+  //raw case [for the comparison] 
+  xf  = seqa(0,1/nm,nm); //interval [0,1]
+  yff = sin(pi*xf)-sin(2*pi*xf)/4+sin(3*pi*xf)/9-sin(4*pi*xf)/16;
+  
+  //kernel estimate [FBM case]
+  
+  {khat_hpower4d0} = krdensity(xd0,xf,hpower4,d0);
+  {khat_hpower4d01} = krdensity(xd01,xf,hpower4,d01);
+  {khat_hpower4d03} = krdensity(xd03,xf,hpower4,d03);
+  {khat_hpower4d04} = krdensity(xd04,xf,hpower4,d04);
+   
+localtime_hpower4d0[k,.] = khat_hpower4d0';
+localtime_hpower4d01[k,.] = khat_hpower4d01';
+localtime_hpower4d03[k,.] = khat_hpower4d03';
+localtime_hpower4d04[k,.] = khat_hpower4d04';
+
+ xfrep[k,.] = xf';
+
+  k = k+1;
+  endo; 
+
+
+// Kernel Estimates
+// FBM case
+localtime_hpower4d0 = packr(localtime_hpower4d0);
+localtime_hpower4d01 = packr(localtime_hpower4d01);  
+localtime_hpower4d03 = packr(localtime_hpower4d03);
+localtime_hpower4d04 = packr(localtime_hpower4d04);     
+  
+xfrep = packr(xfrep); 
+
+// Graphs
+// For Kernel Estimates
+graphset;
+_plegstr = " d=0 \000 d=0.1 \000 d=0.3 \000 d=0.4" ;
+_plegctl = { 2 4.5 6 5 } ;
+xlabel("Long Memory");
+_pdate="";
+_pcolor = {1,1,1,1};
+_pltype = {6,3,4,1};
+_plwidth = {15,15,15,15};
+_pnum    = 2;
+_pnumht  = 0.21;
+_paxht   = 0.21;
+_pypmax  = 2;
+_pxpmax  = 2;
+max_hpower4d0 = maxindc(localtime_hpower4d0);  //For finding the maximum pick
+max_hpower4d01 = maxindc(localtime_hpower4d01);
+max_hpower4d03 = maxindc(localtime_hpower4d03);
+max_hpower4d04 = maxindc(localtime_hpower4d04);
+
+xx = xfrep[max_hpower4d0[1],.];
+yy_hpower4d0 = localtime_hpower4d0[max_hpower4d0[1],.];
+yy_hpower4d01 = localtime_hpower4d01[max_hpower4d01[1],.];
+yy_hpower4d03 = localtime_hpower4d03[max_hpower4d03[1],.];
+yy_hpower4d04 = localtime_hpower4d04[max_hpower4d04[1],.];
+
+xtics(0,1,0.5,1);
+ytics(0,30,4,1);
+xy(xx',yy_hpower4d0'~yy_hpower4d01'~yy_hpower4d03'~yy_hpower4d04');
+
+
+// Graphs [Based on New Style]
+struct plotControl myPlot;
+myPlot = plotGetDefaults("xy");
+
+plotCanvasSize("px", 600 | 400);
+ 
+/*
+** Legend settings
+*/
+ 
+plotSetTextInterpreter(&myPlot, "LaTeX", "legend");
+
+leg_str = "d=0" $|
+          "d=0.1" $|
+          "d=0.3" $|
+          "d=0.4";
+
+plotSetLegend(&myPlot, leg_str, 0.75 | 32, 1);
+
+plotSetLegendFont(&myPlot, "arial", 14);
+
+plotSetLegendBkd(&myPlot, 0);
+ 
+/*
+** Other graph settings
+*/
+ 
+plotSetXLabel(&myplot, "Long Memory (LM)");
+
+clrs = getColorPalette("set2", 4);
+
+clrs = clrs[1 2 3 4];
+plotSetLineColor(&myPlot, clrs);
+ 
+plotSetLineStyle(&myPlot, 1 | 2 | 3 | 4);
+
+plotSetXTicInterval(&myPlot, 1, -1);
+
+plotSetYTicInterval(&myPlot, 4, 0);
+plotSetXTicInterval(&myPlot, 0.5, -1);
+ 
+plotSetYrange(&myPlot, 0, 32);
+plotSetXrange(&myPlot, 0, 1.0);
+ 
+plotSetTicLabelFont(&myPlot, "arial", 14);
+
+plotXY(myPlot, xx',yy_hpower4d0'~yy_hpower4d01'~yy_hpower4d03'~yy_hpower4d04');
+
+
+
+/*
+**
+** Local Time of f(x)-- TFBM case
+**
+*/
+
+new;
+library pgraph;
+  pqgwin many;
+
+ 
+
+proc  ( 1 ) = krdensity(x,xf,hpower,d);  //Local Time estimate [FBM case]
+local n,tvec,gam,arg,ker,ghat,m,denom;
+  n     = rows(x);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = pdfn(arg);
+  denom =  sumc(ker')/((n^(0.5-d))*gam);
+retp(denom);
+endp;
+
+proc  ( 1 ) = krdensitytemp(x,xf,hpower,d,delta);  //Local Time estimate [TFBM case]
+local n,tvec,gam,arg,ker,ghat,m,temp,denom;
+  n     = rows(x);  @ rows x & y the same @
+  m     = rows(xf); @ rows of xf in : mt(xf) = sum{(K(xf-xs)*ys}/sum(K(xf-xs) @
+  tvec  = x;
+  gam   = 1/n^hpower;
+  arg   = (xf*ones(1,n)-ones(m,1)*tvec')/gam;
+  ker   = pdfn(arg);
+  temp = n^(-delta*d);   
+  denom =  sumc(ker')/((n^0.5)*gam*temp);
+retp(denom);
+endp;
+
+
+// proc to generate LM data by looping [FBM case]
+
+proc dsim(u,d);
+/*
+** simulate I(d) data
+** input  = u
+** output = (I-L)^-d u
+*/
+local nn,y,b0,k,b,ur;
+nn= rows(u);
+b = zeros(nn,1);
+y = zeros(nn,1);
+b0=1;          
+k =1;
+do until k>nn;
+   if k==1;
+      b[k]=d;
+   else;   
+      b[k]=(k+d-1)*b[k-1]/k;
+   endif;
+   k = k+1;
+endo;  
+b=b0|b;
+k =1;
+do until k>nn;
+   ur   = rev(u[1:k]);   
+   y[k] = b[1:k]'ur;
+   k = k+1;
+endo;   
+retp(y);
+endp;
+
+// proc to generate LM data by looping [TFBM case]
+
+proc dsimtemp(u,d,delta);
+/*
+** simulate I(d) data
+** input  = u
+** output = (I-e^(-lambda_N)*L)^-d u; lambda_N=1/N^delta
+*/
+local nn,y,b0,k,b,ur,temp;
+nn= rows(u);
+b = zeros(nn,1);
+y = zeros(nn,1);
+temp = exp(-1/nn^delta);    
+b0=1;          
+k =1;
+do until k>nn;
+   if k==1;
+      b[k]=temp*d;
+   else;   
+      b[k]=temp*(k+d-1)*b[k-1]/k;
+   endif;
+   k = k+1;
+endo;  
+b=b0|b;
+k =1;
+do until k>nn;
+   ur   = rev(u[1:k]);   
+   y[k] = b[1:k]'ur;
+   k = k+1;
+endo;   
+retp(y);
+endp;
+
+
+/* main program   */
+ library gauss pgraph;
+  pqgwin many;
+
+
+fn epan(r) = 0.75*(1-r^2).*(abs(r) .le 1);
+   
+   seed1  = 78912342;
+   iter   = 10000;             @ # iterations  @
+   numh   = {800,1000,5000,10000}; @ sample size selections @
+   nm     = 100;            @ number of points of function evaluation @
+   
+d0 = 0;          @ value of d @
+d01 = 0.1;
+d02 = 0.2;
+d03 = 0.3;
+d04 = 0.4;
+
+
+aa     = 0.25; 	       @ AR coefficient for equation error AR model @
+rho    = 0.5;          @ correlation between ux and uy for endogeneity @ 
+	b  = 1;            @ regression coefficient @	
+   sig = 0.2;              @ error standard deviation @
+   
+   hpower  = 1/3;   @ value of bandwidth @
+   hpower2 = 1/4;   
+   hpower3 = 1/5;
+   hpower4 = 1/6;
+   
+   delta1 = 1/3;   @ value of tempering @
+   delta2 = 1/4;
+   delta3 = 1/5;
+   delta4 = 1/6;
+
+"LM d = " d0;
+"rho = " rho;
+"endogeneity correlation = " rho;
+"equation st. error = " sig;
+"AR coefficient for u_y = " aa;
+
+// sample size selection  
+  nn = numh[2]; 
+    
+  localtime_temp1_hpower4d0  = zeros(iter,nm);
+  localtime_temp1_hpower4d01  = zeros(iter,nm);
+  localtime_temp1_hpower4d03  = zeros(iter,nm);
+  localtime_temp1_hpower4d04  = zeros(iter,nm);
+  
+  xfrep = zeros(iter,nm);
+  
+  k = 1;
+  do until k > iter;            @ loop for simulation @
+	  
+  ux  = rndns(nn,1,seed1);    // regressor error  
+  uy  = rndns(nn,1,seed1);           // equation error
+  ux  = ((1-rho^2)^0.5) *ux + rho*uy;  // endogeneity correlation = rho 
+  uy  = recserar(uy,uy[1],aa);  @ converts equation error to AR(1) errors @
+
+
+  ux_temp1_hpower4d0 = dsimtemp(ux,d0,delta1);  // generate LM inputs for regressor [TFBM case: d0]   
+  ux_temp1_hpower4d01 = dsimtemp(ux,d01,delta1);  // generate LM inputs for regressor [TFBM case: d01]  
+  ux_temp1_hpower4d03 = dsimtemp(ux,d03,delta1);  // generate LM inputs for regressor [TFBM case: d03]  
+  ux_temp1_hpower4d04 = dsimtemp(ux,d04,delta1);  // generate LM inputs for regressor [TFBM case: d04]      
+      
+ //x and y
+ x   = recserar(ux,ux[1],1);  // regressor is partial sum of LM inputs [FBM case]
+ ysin = sin(pi*x)-sin(2*pi*x)/4+sin(3*pi*x)/9-sin(4*pi*x)/16;
+ y = b*ysin + sig*uy;                // cointegrated regression equation [FBM case]
+      
+ x_temp1_hpower4d0   = recserar(ux_temp1_hpower4d0,ux_temp1_hpower4d0[1],1);  // regressor is partial sum of LM inputs [TFBM case: d0]
+ ysin_temp1_hpower4d0 = sin(pi*x_temp1_hpower4d0)-sin(2*pi*x_temp1_hpower4d0)/4
+      +sin(3*pi*x_temp1_hpower4d0)/9-sin(4*pi*x_temp1_hpower4d0)/16;
+ y_temp1_hpower4d0 = b*ysin_temp1_hpower4d0 + sig*uy;                // cointegrated regression equation [TFBM case: d0]    
+      
+ x_temp1_hpower4d01   = recserar(ux_temp1_hpower4d01,ux_temp1_hpower4d01[1],1);  // regressor is partial sum of LM inputs [TFBM case: d01]
+ ysin_temp1_hpower4d01 = sin(pi*x_temp1_hpower4d01)-sin(2*pi*x_temp1_hpower4d01)/4
+      +sin(3*pi*x_temp1_hpower4d01)/9-sin(4*pi*x_temp1_hpower4d01)/16;
+ y_temp1_hpower4d01 = b*ysin_temp1_hpower4d01 + sig*uy;                // cointegrated regression equation [TFBM case: d01]
+
+ x_temp1_hpower4d03   = recserar(ux_temp1_hpower4d03,ux_temp1_hpower4d03[1],1);  // regressor is partial sum of LM inputs [TFBM case: d03]
+ ysin_temp1_hpower4d03 = sin(pi*x_temp1_hpower4d03)-sin(2*pi*x_temp1_hpower4d03)/4
+      +sin(3*pi*x_temp1_hpower4d03)/9-sin(4*pi*x_temp1_hpower4d03)/16;
+ y_temp1_hpower4d03 = b*ysin_temp1_hpower4d03 + sig*uy;                // cointegrated regression equation [TFBM case: d03]
+
+ x_temp1_hpower4d04   = recserar(ux_temp1_hpower4d04,ux_temp1_hpower4d04[1],1);  // regressor is partial sum of LM inputs [TFBM case: d04]
+ ysin_temp1_hpower4d04 = sin(pi*x_temp1_hpower4d04)-sin(2*pi*x_temp1_hpower4d04)/4
+      +sin(3*pi*x_temp1_hpower4d04)/9-sin(4*pi*x_temp1_hpower4d04)/16;
+ y_temp1_hpower4d04 = b*ysin_temp1_hpower4d04 + sig*uy;                // cointegrated regression equation [TFBM case: d04]   
+      
+  //raw case [for the comparison] 
+  xf  = seqa(0,1/nm,nm); //interval [0,1]
+  yff = sin(pi*xf)-sin(2*pi*xf)/4+sin(3*pi*xf)/9-sin(4*pi*xf)/16;
+  
+  //kernel estimate [FBM case]
+
+  {khat_temp1_hpower4d0} = krdensitytemp(x_temp1_hpower4d0,xf,hpower4,d0,delta1);
+  {khat_temp1_hpower4d01} = krdensitytemp(x_temp1_hpower4d01,xf,hpower4,d01,delta1);
+  {khat_temp1_hpower4d03} = krdensitytemp(x_temp1_hpower4d03,xf,hpower4,d03,delta1);
+  {khat_temp1_hpower4d04} = krdensitytemp(x_temp1_hpower4d04,xf,hpower4,d04,delta1);
+   
+   
+localtime_temp1_hpower4d0[k,.] = khat_temp1_hpower4d0';
+localtime_temp1_hpower4d01[k,.] = khat_temp1_hpower4d01';
+localtime_temp1_hpower4d03[k,.] = khat_temp1_hpower4d03';
+localtime_temp1_hpower4d04[k,.] = khat_temp1_hpower4d04';
+
+ xfrep[k,.] = xf';
+
+  k = k+1;
+  endo; 
+
+
+// Kernel Estimates 
+// TFBM case
+localtime_temp1_hpower4d0 = packr(localtime_temp1_hpower4d0);
+localtime_temp1_hpower4d01 = packr(localtime_temp1_hpower4d01);
+localtime_temp1_hpower4d03 = packr(localtime_temp1_hpower4d03);
+localtime_temp1_hpower4d04 = packr(localtime_temp1_hpower4d04);     
+  
+xfrep = packr(xfrep); 
+
+// Graphs
+// For Kernel Estimates
+graphset;
+_plegstr = " d=0 \000 d=0.1 \000 d=0.3 \000 d=0.4" ;
+_plegctl = { 2 4.5 6 5 } ;
+xlabel("Semi-Long Memory");
+_pdate="";
+_pcolor = {1,1,1,1};
+_pltype = {6,3,4,1};
+_plwidth = {15,15,15,15};
+_pnum    = 2;
+_pnumht  = 0.21;
+_paxht   = 0.21;
+_pypmax  = 2;
+_pxpmax  = 2;
+max_temp1_hpower4d0 = maxindc(localtime_temp1_hpower4d0);  //For finding the maximum pick
+max_temp1_hpower4d01 = maxindc(localtime_temp1_hpower4d01);
+max_temp1_hpower4d03 = maxindc(localtime_temp1_hpower4d03);
+max_temp1_hpower4d04 = maxindc(localtime_temp1_hpower4d04);
+
+xx = xfrep[max_temp1_hpower4d0[1],.];
+yy_max_temp1_hpower4d0 = localtime_temp1_hpower4d0[max_temp1_hpower4d0[1],.];
+yy_max_temp1_hpower4d01 = localtime_temp1_hpower4d01[max_temp1_hpower4d01[1],.];
+yy_max_temp1_hpower4d03 = localtime_temp1_hpower4d03[max_temp1_hpower4d03[1],.];
+yy_max_temp1_hpower4d04 = localtime_temp1_hpower4d04[max_temp1_hpower4d04[1],.];
+
+xtics(0,1,0.5,1);
+ytics(0,30,4,1);
+xy(xx',yy_max_temp1_hpower4d0'~yy_max_temp1_hpower4d01'~yy_max_temp1_hpower4d03'~yy_max_temp1_hpower4d04');
+
+
+// Graphs [Based on New Style]
+struct plotControl myPlot;
+myPlot = plotGetDefaults("xy");
+
+plotCanvasSize("px", 600 | 400);
+ 
+/*
+** Legend settings
+*/
+ 
+plotSetTextInterpreter(&myPlot, "LaTeX", "legend");
+
+leg_str = "d=0" $|
+          "d=0.1" $|
+          "d=0.3" $|
+          "d=0.4";
+
+plotSetLegend(&myPlot, leg_str, 0.75 | 32, 1);
+
+plotSetLegendFont(&myPlot, "arial", 14);
+
+plotSetLegendBkd(&myPlot, 0);
+ 
+/*
+** Other graph settings
+*/
+ 
+plotSetXLabel(&myplot, "Semi-Long Memory (SLM)");
+
+clrs = getColorPalette("set2", 4);
+
+clrs = clrs[1 2 3 4];
+plotSetLineColor(&myPlot, clrs);
+ 
+plotSetLineStyle(&myPlot, 1 | 2 | 3 | 4);
+
+plotSetXTicInterval(&myPlot, 1, -1);
+
+plotSetYTicInterval(&myPlot, 4, 0);
+plotSetXTicInterval(&myPlot, 0.5, -1);
+ 
+plotSetYrange(&myPlot, 0, 32);
+plotSetXrange(&myPlot, 0, 1.0);
+ 
+plotSetTicLabelFont(&myPlot, "arial", 14);
+
+plotXY(myPlot, xx',yy_max_temp1_hpower4d0'~yy_max_temp1_hpower4d01'~yy_max_temp1_hpower4d03'~yy_max_temp1_hpower4d04');
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
